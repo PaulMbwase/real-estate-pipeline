@@ -129,4 +129,4 @@ class ListingCommercial(Base):
 
 if __name__ == "__main__":
     Base.metadata.create_all(engine)
-    print("All tables created successfully.")
+    print("All tables created successfully!")

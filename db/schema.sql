@@ -60,14 +60,14 @@ CREATE TABLE IF NOT EXISTS listings (
 
 CREATE TABLE IF NOT EXISTS price_history (
     id              SERIAL PRIMARY KEY,
-    listing_id      INT NOT NULL UNIQUE REFERENCES listings(id),
+    listing_id      INT NOT NULL REFERENCES listings(id),
     price           DECIMAL(12,2) NOT NULL,
     recorded_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS listing_images (
     id              SERIAL PRIMARY KEY,
-    listing_id      INT NOT NULL UNIQUE REFERENCES listings(id),
+    listing_id      INT NOT NULL REFERENCES listings(id),
     image_url       TEXT NOT NULL,
     is_primary      BOOLEAN DEFAULT FALSE,
     display_order   SMALLINT DEFAULT 0
