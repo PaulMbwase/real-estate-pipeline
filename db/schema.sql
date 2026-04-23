@@ -11,8 +11,7 @@ CREATE TABLE IF NOT EXISTS brokers (
 
 CREATE TABLE IF NOT EXISTS locations (
     id              SERIAL PRIMARY KEY,
-    street_address  VARCHAR(255) NOT NULL,
-    city            VARCHAR(100) NOT NULL,
+    address         VARCHAR(255),
     province        VARCHAR(50) NOT NULL,
     postal_code     VARCHAR(10),
     neighborhood    VARCHAR(150),
@@ -39,6 +38,15 @@ CREATE TABLE IF NOT EXISTS properties (
     pool            BOOLEAN DEFAULT FALSE,
     basement        BOOLEAN DEFAULT FALSE,
     waterfront      BOOLEAN DEFAULT FALSE,
+    municipal_assessment    DECIMAL(12,2)  -- total assessed value
+    assessment_year         SMALLINT       -- year of assessment
+    lot_assessment          DECIMAL(12,2)  -- lot portion
+    building_assessment     DECIMAL(12,2)  -- building portion
+
+    -- Annual expenses
+    municipal_taxes         DECIMAL(10,2)
+    school_taxes            DECIMAL(10,2)
+    financial_data  JSONB,
     created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 

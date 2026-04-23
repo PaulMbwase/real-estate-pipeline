@@ -66,30 +66,45 @@ def upsert_broker(session: Session, broker_data: dict) -> Broker | None:
     return broker
 
 
-def upsert_location(session: Session, listing_data: dict, geo: dict) -> Location:
-    """Insert location if not exists, return location object."""
-    street = listing_data.get("street")
-    city   = listing_data.get("city")
-
+def upsert_location(session: Session, address: str | None, geo: dict) -> Location:
     location = session.scalar(
-        select(Location).where(
-            Location.street_address == street,
-            Location.city == city
-        )
+        select(Location).where(Location.address == address)
     )
-
     if not location:
         location = Location(
-            street_address = street,
-            city           = city,
-            province       = "QC",
-            latitude       = geo.get("latitude"),
-            longitude      = geo.get("longitude"),
+            address   = address,
+            province  = "QC",
+            latitude  = geo.get("latitude"),
+            longitude = geo.get("longitude"),
         )
         session.add(location)
         session.flush()
-
     return location
+
+# def upsert_location(session: Session, listing_data: dict, geo: dict) -> Location:
+#     """Insert location if not exists, return location object."""
+#     street = listing_data.get("street")
+#     city   = listing_data.get("city")
+
+#     location = session.scalar(
+#         select(Location).where(
+#             Location.street_address == street,
+#             Location.city == city
+#         )
+#     )
+
+#     if not location:
+#         location = Location(
+#             street_address = street,
+#             city           = city,
+#             province       = "QC",
+#             latitude       = geo.get("latitude"),
+#             longitude      = geo.get("longitude"),
+#         )
+#         session.add(location)
+#         session.flush()
+
+#     return location
 
 def upsert_property(session: Session, listing_data: dict,
                     detail: dict, location: Location) -> Property | None:
@@ -119,6 +134,13 @@ def upsert_property(session: Session, listing_data: dict,
             pool           = parse_bool(detail.get("pool")),
             basement       = parse_bool(detail.get("basement")),
             waterfront     = False,
+            lot_assessment       = parse_float(detail.get("lot_assessment")),
+            building_assessment  = parse_float(detail.get("building_assessment")),
+            municipal_assessment = parse_float(detail.get("municipal_assessment")),
+            assessment_year      = parse_int(detail.get("assessment_year")),
+            municipal_taxes      = parse_float(detail.get("municipal_taxes")),
+            school_taxes         = parse_float(detail.get("school_taxes")),
+            financial_data       = detail.get("financial_data", {}),
         )
         session.add(prop)
         session.flush()
@@ -141,9 +163,11 @@ def upsert_listing(session: Session, listing_data: dict,
     price     = None
     if raw_price:
         # Clean price string → Decimal : "$450,000" → 450000.00
-        price = raw_price.replace("$", "").replace(",", "").replace(" ", "").strip()
+        # price = raw_price.replace("$", "").replace(",", "").replace(" ", "").strip()
+        match = re.search(r'[\d,]+', raw_price.replace(" ", ""))
         try:
-            price = float(price)
+            price = float(match.group().replace(",", ".")) if match else None
+
         except ValueError:
             price = None
 
@@ -192,7 +216,48 @@ def insert_images(session: Session, listing: Listing, images: list[str]) -> None
             display_order = i
         ))
 
+def insert_listing_extension(session: Session, listing: Listing, 
+                              listing_data: dict, detail: dict) -> None:
+    """Insert into the appropriate extension table based on property type."""
+    category = (listing_data.get("category") or "").lower()
 
+    if "condo" in category:
+        existing = session.scalar(
+            select(ListingCondo).where(ListingCondo.listing_id == listing.id)
+        )
+        if not existing:
+            session.add(ListingCondo(
+                listing_id   = listing.id,
+                condo_fees   = parse_float(detail.get("condo_fees")),
+                floor_number = parse_int(detail.get("floor_number")),
+                total_floors = parse_int(detail.get("total_floors")),
+                locker       = parse_bool(detail.get("locker")),
+            ))
+
+    elif any(x in category for x in ["plex", "duplex", "triplex", 
+                                      "quadruplex", "quintuplex"]):
+        existing = session.scalar(
+            select(ListingPlex).where(ListingPlex.listing_id == listing.id)
+        )
+        if not existing:
+            session.add(ListingPlex(
+                listing_id     = listing.id,
+                units          = parse_int(detail.get("units")) or 2,
+                rental_income  = parse_float(detail.get("rental_income")),
+                kitchens       = parse_int(detail.get("kitchens")),
+            ))
+
+    elif "commercial" in category:
+        existing = session.scalar(
+            select(ListingCommercial).where(ListingCommercial.listing_id == listing.id)
+        )
+        if not existing:
+            session.add(ListingCommercial(
+                listing_id     = listing.id,
+                zoning         = detail.get("zoning"),
+                business_type  = detail.get("business_type"),
+                ceiling_height = parse_float(detail.get("ceiling_height")),
+            ))
 # ----------------------------
 # MAIN PIPELINE
 # ----------------------------
@@ -332,11 +397,12 @@ async def main():
 
                         detail = await enrich_listing(page, url)
                         await save_raw(listing_data["property_id"], {**listing_data, **detail})
-
-                        geo = await geocode_address(
-                            listing_data.get("street"),
-                            listing_data.get("city")
-                        )
+                        
+                        geo = await geocode_address(listing_data.get("address")) # type: ignore
+                        # geo = await geocode_address(
+                            # listing_data.get("street"),
+                            # listing_data.get("city")
+                        # )
 
                         broker_info = await extract_broker_url(page)
                         broker      = None
@@ -358,7 +424,7 @@ async def main():
                             await page.wait_for_load_state("networkidle")
 
                         with session.begin_nested():
-                            location = upsert_location(session, listing_data, geo)
+                            location = upsert_location(session, listing_data.get("address"), geo)
                             prop     = upsert_property(session, listing_data, detail, location)
                             if not prop:
                                 continue
@@ -366,6 +432,8 @@ async def main():
                             if not listing:
                                 continue
                             insert_images(session, listing, detail.get("images", []))
+                            insert_listing_extension(session, listing, listing_data, detail)  # ← add this
+
 
                         session.commit()
                         print(f"  ✅ Saved: {listing_data['property_id']}")

@@ -4,12 +4,17 @@ import asyncio
 
 geolocator = Nominatim(user_agent="real-estate-pipeline")
 
-async def geocode_address(street: str | None, city: str | None) -> dict:
-    """Convert a street address and city into lat/lon coordinates."""
-    if not street and not city:
-        return {"latitude": None, "longitude": None}
+# async def geocode_address(street: str | None, city: str | None) -> dict:
+#     """Convert a street address and city into lat/lon coordinates."""
+#     if not street and not city:
+#         return {"latitude": None, "longitude": None}
 
-    query = ", ".join(filter(None, [street, city, "Quebec, Canada"]))
+#     query = ", ".join(filter(None, [street, city, "Quebec, Canada"]))
+async def geocode_address(address: str | None) -> dict:
+    if not address:
+        return {"latitude": None, "longitude": None}
+    query = f"{address}, Quebec, Canada"
+    # rest stays the same
 
     try:
         # Run blocking geopy call in executor to keep async flow
@@ -51,25 +56,32 @@ async def safe_attr(locator, attr: str) -> str | None:
         return None
     except Exception:
         return None
+    
 
-async def clean_address(address: str | None) -> dict:
-    """Parse raw address string into street and city components."""
+async def clean_address(address: str | None) -> str | None:
+    """Clean raw address string into a single normalized string."""
     if not address:
-        return {"street": None, "city": None}
+        return None
+    return " ".join(address.split())
 
-    # Try newline split first
-    parts = [p.strip() for p in address.split('\n') if p.strip()]
+# async def clean_address(address: str | None) -> dict:
+#     """Parse raw address string into street and city components."""
+#     if not address:
+#         return {"street": None, "city": None}
 
-    if len(parts) >= 2:
-        return {"street": parts[0], "city": parts[1]}
+#     # Try newline split first
+#     parts = [p.strip() for p in address.split('\n') if p.strip()]
 
-    # Fallback — try comma split
-    parts = [p.strip() for p in address.split(',') if p.strip()]
-    if len(parts) >= 2:
-        return {"street": parts[0], "city": parts[-1]}
+#     if len(parts) >= 2:
+#         return {"street": parts[0], "city": parts[1]}
 
-    # Last resort — everything goes to street, city unknown
-    return {"street": parts[0] if parts else None, "city": None}
+#     # Fallback — try comma split
+#     parts = [p.strip() for p in address.split(',') if p.strip()]
+#     if len(parts) >= 2:
+#         return {"street": parts[0], "city": parts[-1]}
+
+#     # Last resort — everything goes to street, city unknown
+#     return {"street": parts[0] if parts else None, "city": None}
 
 
 async def extract_detail(page, label_fr: str, label_en: str) -> str | None:

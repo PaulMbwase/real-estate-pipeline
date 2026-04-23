@@ -2,6 +2,7 @@ from sqlalchemy import (create_engine, String, Text,
                         Numeric, SmallInteger, Boolean,
                         Date, TIMESTAMP, ForeignKey)
 from sqlalchemy.orm import declarative_base, relationship, Mapped, mapped_column
+from sqlalchemy.dialects.postgresql import JSONB
 from dotenv import load_dotenv
 from typing import Optional
 from datetime import datetime, date
@@ -32,15 +33,14 @@ class Broker(Base):
 
 class Location(Base):
     __tablename__ = "locations"
-    id: Mapped[int] = mapped_column(primary_key=True)
-    street_address: Mapped[str] = mapped_column(String(255))
-    city: Mapped[str] = mapped_column(String(100))
-    province: Mapped[Optional[str]] = mapped_column(String(50))
-    postal_code: Mapped[Optional[str]] = mapped_column(String(10))
+    id:           Mapped[int] = mapped_column(primary_key=True)
+    address:      Mapped[Optional[str]] = mapped_column(String(255))
+    province:     Mapped[Optional[str]] = mapped_column(String(50))
+    postal_code:  Mapped[Optional[str]] = mapped_column(String(10))
     neighborhood: Mapped[Optional[str]] = mapped_column(String(150))
-    latitude: Mapped[Optional[Decimal]] = mapped_column(Numeric(9,6))
-    longitude: Mapped[Optional[Decimal]] = mapped_column(Numeric(9,6))
-    created_at: Mapped[datetime] = mapped_column(default=datetime.now)
+    latitude:     Mapped[Optional[Decimal]] = mapped_column(Numeric(9,6))
+    longitude:    Mapped[Optional[Decimal]] = mapped_column(Numeric(9,6))
+    created_at:   Mapped[datetime] = mapped_column(default=datetime.now)
 
 
 class Property(Base):
@@ -62,6 +62,13 @@ class Property(Base):
     pool: Mapped[bool] = mapped_column(Boolean, default=False)
     basement: Mapped[bool] = mapped_column(Boolean, default=False)
     waterfront: Mapped[bool] = mapped_column(Boolean, default=False)
+    lot_assessment:       Mapped[Optional[Decimal]] = mapped_column(Numeric(12,2))
+    building_assessment:  Mapped[Optional[Decimal]] = mapped_column(Numeric(12,2))
+    municipal_assessment: Mapped[Optional[Decimal]] = mapped_column(Numeric(12,2))
+    assessment_year:      Mapped[Optional[int]] = mapped_column(SmallInteger)
+    municipal_taxes:      Mapped[Optional[Decimal]] = mapped_column(Numeric(10,2))
+    school_taxes:         Mapped[Optional[Decimal]] = mapped_column(Numeric(10,2))
+    financial_data:       Mapped[Optional[dict]] = mapped_column(JSONB)
     created_at: Mapped[datetime] = mapped_column(default=datetime.now)
 
 

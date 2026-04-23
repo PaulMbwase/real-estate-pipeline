@@ -4,6 +4,7 @@ import json
 from datetime import datetime 
 from playwright.async_api import Page
 from scraper.utils import safe_text, safe_attr, clean_address, extract_detail
+from scraper.parse_helpers import *
 from dotenv import load_dotenv
 import os
 import re
@@ -27,13 +28,11 @@ async def handle_cookies(page: Page) -> None:
     except Exception:
         print("No cookie popup found — continuing.")
 
-
 async def get_listings_from_page(page: Page) -> list[dict]:
-    """Extract all listing cards from a search results page."""
     try:
         await page.wait_for_selector(
             "[class*='property-thumbnail-item']",
-            timeout=10000  # shorter timeout
+            timeout=10000
         )
     except Exception:
         print("  ⚠️ No listings found on this page — skipping.")
@@ -45,7 +44,7 @@ async def get_listings_from_page(page: Page) -> list[dict]:
 
     listings = []
     for i in range(count):
-        card = cards.nth(i)
+        card         = cards.nth(i)
         raw_address  = await safe_text(card.locator("[class*='address']"))
         address      = await clean_address(raw_address)
         price        = await safe_text(card.locator("[class*='price']"))
@@ -61,26 +60,37 @@ async def get_listings_from_page(page: Page) -> list[dict]:
             "bathrooms":    await safe_text(card.locator("[class*='sdb']")),
             "property_url": f"{BASE_URL}" + property_url if property_url else None
         })
-
     return listings
 
-
 async def enrich_listing(page: Page, url: str) -> dict:
-    """Visit a listing detail page and extract deep features."""
     await page.goto(url)
     await page.wait_for_load_state("networkidle")
 
+    financial = await extract_financial_details(page)
+
     return {
-        "size_sqft":    await extract_detail(page, "Superficie habitable", "Living area"),
-        "year_built":   await extract_detail(page, "Année de construction", "Year built"),
-        "broker":       await extract_detail(page, "Courtier", "Real estate broker"),
-        "total_rooms":  await extract_detail(page, "Pièces", "Rooms"),
-        "garage":       await extract_detail(page, "Garage", "Garage"),
-        "pool":         await extract_detail(page, "Piscine", "Pool"),
-        "lot_size":     await extract_detail(page, "Superficie du terrain", "Lot area"),
-        "floors":       await extract_detail(page, "Étages", "Floors"),
-        "description":  await safe_text(page.locator("[itemprop='description']")),
-        "images":       await get_images(page),
+        "size_sqft":            await extract_detail(page, "Superficie habitable", "Living area"),
+        "year_built":           await extract_detail(page, "Année de construction", "Year built"),
+        "broker":               await extract_detail(page, "Courtier", "Real estate broker"),
+        "total_rooms":          await extract_detail(page, "Pièces", "Rooms"),
+        "garage":               await extract_detail(page, "Garage", "Garage"),
+        "pool":                 await extract_detail(page, "Piscine", "Pool"),
+        "lot_size":             await extract_detail(page, "Superficie du terrain", "Lot area"),
+        "floors":               await extract_detail(page, "Étages", "Floors"),
+        "description":          await safe_text(page.locator("[itemprop='description']")),
+        "images":               await get_images(page),
+        "half_bathrooms":       await extract_detail(page, "Salles d'eau", "Powder rooms"),
+        "parking":              await extract_detail(page, "Stationnements", "Parking"),
+        "basement":             await extract_detail(page, "Sous-sol", "Basement"),
+        "condo_fees":           await extract_detail(page, "Frais de copropriété", "Co-ownership fees"),
+        "floor_number":         await extract_detail(page, "Étage", "Floor"),
+        "locker":               await extract_detail(page, "Casier", "Locker"),
+        "units":                await extract_detail(page, "Logements", "Units"),
+        "rental_income":        await extract_detail(page, "Revenus", "Revenue"),
+        "zoning":               await extract_detail(page, "Zonage", "Zoning"),
+        "ceiling_height":       await extract_detail(page, "Hauteur sous plafond", "Ceiling height"),
+        # Financial details
+        **financial
     }
 
 
@@ -92,16 +102,25 @@ async def save_raw(property_id: str, data: dict) -> None:
         json.dump(data, f, ensure_ascii=False, indent=2, default=str)
 
 async def get_images(page: Page) -> list[str]:
-    """Extract all image URLs from a listing detail page."""
+    """Extract all image URLs from data-photo-urls attribute."""
     try:
-        images = page.locator("img[class*='thumbnail'], img[class*='photo']")
-        count  = await images.count()
-        urls   = []
-        for i in range(count):
-            src = await images.nth(i).get_attribute("src")
-            if src:
-                urls.append(src)
+        container = page.locator("#property-roomvo-data")
+        if await container.count() == 0:
+            # Fallback — primary image only
+            img = page.locator("img[itemprop='image']")
+            if await img.count() > 0:
+                src = await img.first.get_attribute("src")
+                return [src] if src else []
+            return []
+
+        raw = await container.get_attribute("data-photo-urls")
+        if not raw:
+            return []
+
+        # Split comma-separated URLs and clean HTML entities
+        urls = [url.strip().replace("&amp;", "&") for url in raw.split(",") if url.strip()]
         return urls
+
     except Exception:
         return []
 ############################
@@ -232,7 +251,7 @@ async def extract_broker_url(page: Page) -> dict | None:
             return None
 
         href = await broker_link.first.get_attribute("href")
-        if not href:
+        if not href or "contact" in href or "choose" in href.lower():
             return None
 
         # Parse info directly from URL
@@ -280,3 +299,106 @@ async def extract_broker_details(page: Page, broker_url: str) -> dict:
         "contact_url": contact_url,
         "agency_name": await safe_text(page.locator("h2.broker-info__agency-name")),
     }
+
+
+async def extract_financial_details(page: Page) -> dict:
+    """Dynamically extract all rows from the financial details tables."""
+    result = {
+        "lot_assessment":      None,
+        "building_assessment": None,
+        "municipal_assessment": None,
+        "assessment_year":     None,
+        "financial_data":      {}  # catches everything dynamically
+    }
+
+    try:
+        container = page.locator(".financial-details-container")
+        if await container.count() == 0:
+            return result
+
+        # --- Municipal assessment (always static structure) ---
+        assessment_header = container.locator(
+            "th.financial-details-table-title"
+        ).filter(has_text="Municipal assessment")
+
+        if await assessment_header.count() > 0:
+            header_text = await assessment_header.first.text_content()
+            year_match  = re.search(r'\((\d{4})\)', header_text) # type: ignore
+            if year_match:
+                result["assessment_year"] = int(year_match.group(1))
+
+            assessment_table = assessment_header.locator("xpath=../../../..")
+            rows  = assessment_table.locator("tbody tr")
+            count = await rows.count()
+
+            for i in range(count):
+                row   = rows.nth(i)
+                label = await row.locator("td:first-child").text_content()
+                value = await row.locator("td.text-right").text_content()
+                label = label.strip().lower() # type: ignore
+                value = parse_float(value)
+                if "lot" in label:
+                    result["lot_assessment"] = value
+                elif "building" in label:
+                    result["building_assessment"] = value
+
+            total = assessment_table.locator(
+                "tfoot .financial-details-table-total td.text-right"
+            )
+            if await total.count() > 0:
+                result["municipal_assessment"] = parse_float(
+                    await total.text_content()
+                )
+
+        # --- All yearly tables — fully dynamic ---
+        yearly_tables = container.locator(
+            ".financial-details-table-yearly table, "
+            ".financial-details-table:not(.financial-details-table-monthly) table"
+        )
+        table_count = await yearly_tables.count()
+
+        for t in range(table_count):
+            table = yearly_tables.nth(t)
+
+            # Get table title
+            title_el = table.locator("th.financial-details-table-title")
+            title = await title_el.text_content() if await title_el.count() > 0 else f"table_{t}"
+            title = title.strip().lower().replace(" ", "_") # type: ignore
+
+            # Get all rows dynamically
+            rows  = table.locator("tbody tr")
+            count = await rows.count()
+
+            for i in range(count):
+                row   = rows.nth(i)
+                label = await row.locator("td:first-child").text_content()
+                value = await row.locator("td.text-right").text_content()
+
+                if not label or not value:
+                    continue
+
+                # Clean label into snake_case key
+                clean_label = (
+                    label.strip()
+                    .lower()
+                    .replace(" ", "_")
+                    .replace("(", "")
+                    .replace(")", "")
+                    .replace("/", "_")
+                )
+                clean_key = f"{title}__{clean_label}"
+                result["financial_data"][clean_key] = parse_float(value)
+
+            # Also grab tfoot total
+            total = table.locator(
+                "tfoot .financial-details-table-total td.text-right"
+            )
+            if await total.count() > 0:
+                result["financial_data"][f"{title}__total"] = parse_float(
+                    await total.text_content()
+                )
+
+    except Exception as e:
+        print(f"  ⚠️ Financial details error: {e}")
+
+    return result
