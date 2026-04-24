@@ -34,6 +34,18 @@ async def human_delay(min_sec: float = 1.5, max_sec: float = 5.0) -> None:
     """Simulate human-like pause between actions."""
     await asyncio.sleep(random.uniform(min_sec, max_sec))
 
+async def safe_goto(page: Page, url: str, retries: int = 3) -> bool:
+    """Navigate with retry logic for network failures."""
+    for attempt in range(retries):
+        try:
+            await page.goto(url)
+            await page.wait_for_load_state("networkidle")
+            return True
+        except Exception as e:
+            print(f"  ⚠️ Navigation failed (attempt {attempt + 1}/{retries}): {e}")
+            await asyncio.sleep(5 * (attempt + 1))  # 5s, 10s, 15s
+    return False
+
 async def extract_coordinates(page: Page) -> dict:
     """Extract lat/lon directly from schema.org metadata."""
     try:

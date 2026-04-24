@@ -284,7 +284,7 @@ def insert_listing_extension(session: Session, listing: Listing,
                 listing_id     = listing.id,
                 zoning         = safe_truncate(detail.get("zoning"), 255),
                 business_type  = safe_truncate(detail.get("business_type"), 255),
-                ceiling_height = parse_float(detail.get("ceiling_height")),
+                ceiling_height = parse_float(detail.get("ceiling_height"), max_values=50.0),
             ))
 # ----------------------------
 # MAIN PIPELINE
@@ -401,12 +401,19 @@ async def main(target_url: str):
         )
         page = await context.new_page()
 
-        await page.goto(f"{BASE_URL}")
-        await page.wait_for_load_state("networkidle")
+        success = await safe_goto(page, f"{BASE_URL}")
+        if not success:
+            print(f"  ❌ Skipping — could not reach {url}")
+            
+
         await handle_cookies(page)
 
-        await page.goto(f"{target_url}")
-        await page.wait_for_load_state("networkidle")
+       
+
+        success = await safe_goto(page, target_url)
+        if not success:
+            print(f"  ❌ Skipping — could not reach {url}")
+            
 
         total_pages = await get_total_pages(page)
         print(f"Total pages: {total_pages}")
@@ -415,6 +422,7 @@ async def main(target_url: str):
 
         with Session(engine) as session:
             for page_num in range(1, total_pages + 1):
+                await wait_for_network()
                 print(f"\n--- Scraping page {page_num}/{total_pages} ---")
 
                 # Recover browser if it died
@@ -428,14 +436,23 @@ async def main(target_url: str):
                         pass
                     browser = await p.chromium.launch(headless=False)
                     page = await browser.new_page()
-                    await page.goto(f"{BASE_URL}")
-                    await page.wait_for_load_state("networkidle")
+
+                    success = await safe_goto(page, f"{BASE_URL}")
+                    if not success:
+                        print(f"  ❌ Skipping — could not reach {url}")
+                        continue
+                    
                     await handle_cookies(page)
 
                 try:
                     page_url = f"{target_url}&page={page_num}"
-                    await page.goto(page_url)
-                    await page.wait_for_load_state("networkidle")
+
+                    success = await safe_goto(page, page_url)
+                    if not success:
+                        print(f"  ❌ Skipping — could not reach {url}")
+                        
+
+                
                 except Exception as e:
                     print(f"  ❌ Failed to load page {page_num}: {e}")
                     continue

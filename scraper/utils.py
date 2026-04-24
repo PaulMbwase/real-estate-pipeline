@@ -1,6 +1,7 @@
 from geopy.geocoders import Nominatim
 from geopy.exc import GeocoderTimedOut
 import asyncio
+import socket
 
 geolocator = Nominatim(user_agent="real-estate-pipeline")
 
@@ -88,3 +89,15 @@ async def extract_detail(page, label_fr: str, label_en: str) -> str | None:
             except Exception:
                 pass
     return None
+
+
+async def wait_for_network(retries: int = 5) -> None:
+    """Wait until network is reachable before continuing."""
+    for attempt in range(retries):
+        try:
+            socket.getaddrinfo("google.com", 80)
+            return  # network is up
+        except socket.gaierror:
+            print(f"  ⚠️ Network down — waiting 15 seconds... ({attempt + 1}/{retries})")
+            await asyncio.sleep(15)
+    raise RuntimeError("Network unreachable after multiple retries.")

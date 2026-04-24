@@ -132,7 +132,7 @@ class ListingCommercial(Base):
     listing_id: Mapped[int] = mapped_column(ForeignKey("listings.id"), unique=True)
     zoning: Mapped[Optional[str]] = mapped_column(Text)
     business_type: Mapped[Optional[str]] = mapped_column(Text)
-    ceiling_height: Mapped[Optional[Decimal]] = mapped_column(Numeric(5,2))
+    ceiling_height: Mapped[Optional[Decimal]] = mapped_column(Numeric(8,2))
 
 
 if __name__ == "__main__":
