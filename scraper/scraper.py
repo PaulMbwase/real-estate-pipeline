@@ -3,7 +3,7 @@
 import json
 from datetime import datetime 
 from playwright.async_api import Page
-from scraper.utils import safe_text, safe_attr, clean_address, extract_detail
+from scraper.utils import *
 from scraper.parse_helpers import *
 from dotenv import load_dotenv
 import os

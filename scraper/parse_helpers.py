@@ -41,6 +41,12 @@ def parse_bool(value: str | None) -> bool:
     negative = ['no ', 'none', 'sans', 'aucun']
     return not any(n in value.lower() for n in negative)
 
+def safe_truncate(value: str | None, max_length: int = 255) -> str | None:
+    """Truncate string to max_length to prevent DB overflow."""
+    if not value:
+        return None
+    return value[:max_length]
+
 
 def normalize_property_type(category: str | None) -> str | None:
     """Normalize raw category into clean property type."""
@@ -64,8 +70,13 @@ def normalize_property_type(category: str | None) -> str | None:
     if "commercial" in cat:                return "commercial"
     if "office" in cat:                    return "office"
     if "industrial" in cat:                return "industrial"
+    if "restaurant" in cat:                return "restaurant"
+    if "business" in cat:                return "business"
+    if "warehouse" in cat:                return "warehouse"
+    if "building" in cat:                return "building"
+    if "retail" in cat:                return "retail"
 
-    return None
+    return cat.replace(" for sale", "").replace(" for rent", "").strip().replace(" ", "_")
 
 
 def normalize_transaction_type(category: str | None) -> list[str]:

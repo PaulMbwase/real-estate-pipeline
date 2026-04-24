@@ -6,7 +6,7 @@ import asyncio
 from playwright.async_api import async_playwright
 from dotenv import load_dotenv
 from scraper.scraper import *
-from scraper.utils import geocode_address
+from scraper.utils import *
 from scraper.parse_helpers import *
 from db.models import (
     engine, Base,
@@ -52,7 +52,7 @@ def upsert_broker(session: Session, broker_data: dict) -> Broker | None:
             last_name   = last_name  or "Unknown",
             phone       = broker_data.get("phone"),
             contact_url = broker_data.get("contact_url"),
-            agency_name = broker_data.get("agency_name"),
+            agency_name = safe_truncate(broker_data.get("agency_name"), 255),
         )
         session.add(broker)
         session.flush()  # get broker.id without full commit
@@ -273,15 +273,17 @@ def insert_listing_extension(session: Session, listing: Listing,
                 kitchens       = parse_int(detail.get("kitchens")),
             ))
 
-    elif "commercial" in category:
+    elif any(x in category for x in ["commercial", "office", "industrial", 
+                            "restaurant", "warehouse", "retail",
+                            "business", "building"]):
         existing = session.scalar(
             select(ListingCommercial).where(ListingCommercial.listing_id == listing.id)
         )
         if not existing:
             session.add(ListingCommercial(
                 listing_id     = listing.id,
-                zoning         = detail.get("zoning"),
-                business_type  = detail.get("business_type"),
+                zoning         = safe_truncate(detail.get("zoning"), 255),
+                business_type  = safe_truncate(detail.get("business_type"), 255),
                 ceiling_height = parse_float(detail.get("ceiling_height")),
             ))
 # ----------------------------

@@ -48,7 +48,7 @@ class Property(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     location_id: Mapped[Optional[int]] = mapped_column(ForeignKey("locations.id"))
     property_id: Mapped[str] = mapped_column(String(50), unique=True)
-    property_type: Mapped[str] = mapped_column(String(50))
+    property_type: Mapped[Optional[str]] = mapped_column(String(50))
     year_built: Mapped[Optional[int]] = mapped_column(SmallInteger)
     size_sqft: Mapped[Optional[Decimal]] = mapped_column(Numeric(10,2))
     lot_size_sqft: Mapped[Optional[Decimal]] = mapped_column(Numeric(10,2))
@@ -130,8 +130,8 @@ class ListingCommercial(Base):
     __tablename__ = "listing_commercial"
     id: Mapped[int] = mapped_column(primary_key=True)
     listing_id: Mapped[int] = mapped_column(ForeignKey("listings.id"), unique=True)
-    zoning: Mapped[Optional[str]] = mapped_column(String(100))
-    business_type: Mapped[Optional[str]] = mapped_column(String(50))
+    zoning: Mapped[Optional[str]] = mapped_column(Text)
+    business_type: Mapped[Optional[str]] = mapped_column(Text)
     ceiling_height: Mapped[Optional[Decimal]] = mapped_column(Numeric(5,2))
 
 
