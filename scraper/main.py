@@ -501,7 +501,7 @@ async def main(target_url: str):
                                 if not listing:
                                     continue
                                 insert_images(session, listing, detail.get("images", []))
-                                insert_listing_extension(session, listing, listing_data, detail)
+                                insert_listing_extension(session, listing, listing_data, detail, prop)
 
 
                         session.commit()
@@ -525,6 +525,7 @@ def start_scraper(target_url: str):
 
 
 if __name__ == "__main__":
+    start = time.perf_counter()
     p1 = multiprocessing.Process(
         target=start_scraper,
         args=(TARGET_URL_RESIDENTIAL,),
@@ -542,3 +543,5 @@ if __name__ == "__main__":
     p1.join()
     p2.join()
     print("Both scrapers finished.")
+    end = time.perf_counter()
+    print(f"Elapsed time: {end - start:.6f} seconds")

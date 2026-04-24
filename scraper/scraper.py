@@ -30,7 +30,7 @@ async def handle_cookies(page: Page) -> None:
     except Exception:
         print("No cookie popup found — continuing.")
 
-async def human_delay(min_sec: float = 1.5, max_sec: float = 4.0) -> None:
+async def human_delay(min_sec: float = 1.5, max_sec: float = 5.0) -> None:
     """Simulate human-like pause between actions."""
     await asyncio.sleep(random.uniform(min_sec, max_sec))
 
