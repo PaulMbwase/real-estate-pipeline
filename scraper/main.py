@@ -116,7 +116,7 @@ def upsert_property(session: Session, listing_data: dict,
         prop = Property(
             location_id    = location.id,
             property_id    = property_id,
-            property_type  = listing_data.get("category"),
+            property_type  = normalize_property_type(listing_data.get("category")),
             year_built     = parse_year(detail.get("year_built")),
             size_sqft      = parse_float(detail.get("size_sqft")),
             lot_size_sqft  = parse_float(detail.get("lot_size")),
@@ -196,7 +196,7 @@ def upsert_listing(session: Session, listing_data: dict,
             property_id = prop.id,
             broker_id   = broker.id if broker else None,
             listing_id  = listing_id,
-            category    = listing_data.get("category"),
+            category    = listing_data.get("transaction_type"),
             price       = price,
             status      = "Active",
             description = detail.get("description"),
@@ -430,7 +430,7 @@ async def main(target_url: str):
                     await handle_cookies(page)
 
                 try:
-                    page_url = f"{TARGET_URL}&pageSize=20&page={page_num}"
+                    page_url = f"{target_url}&page={page_num}"
                     await page.goto(page_url)
                     await page.wait_for_load_state("networkidle")
                 except Exception as e:
@@ -492,16 +492,20 @@ async def main(target_url: str):
                             prop     = upsert_property(session, listing_data, detail, location)
                             if not prop:
                                 continue
-                            listing  = upsert_listing(session, listing_data, detail, prop, broker)
-                            if not listing:
-                                continue
-                            insert_images(session, listing, detail.get("images", []))
-                            insert_listing_extension(session, listing, listing_data, detail)  
+                            transaction_types = normalize_transaction_type(listing_data.get("category"))
+
+                            for transaction_type in transaction_types:
+                                listing_data["transaction_type"] = transaction_type
+                                listing = upsert_listing(session, listing_data, detail, prop, broker)
+                                if not listing:
+                                    continue
+                                insert_images(session, listing, detail.get("images", []))
+                                insert_listing_extension(session, listing, listing_data, detail)
 
 
                         session.commit()
                         print(f"  ✅ Saved: {listing_data['property_id']}")
-                        time.sleep(random.randint(1,3))
+                        # time.sleep(random.randint(1,3))
 
                     except Exception as e:
                         print(f"  ❌ Failed: {listing_data['property_id']} — {e}")

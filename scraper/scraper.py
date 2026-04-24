@@ -342,6 +342,7 @@ async def extract_broker_details(page: Page, broker_url: str) -> dict:
     """Visit broker profile page and extract full details."""
     await page.goto(broker_url)
     await page.wait_for_load_state("networkidle")
+    await human_delay()
 
     # Phone lives in href="tel:..." attribute
     phone = None
