@@ -5,25 +5,29 @@ def parse_year(value: str | None) -> int | None:
     """Extract 4-digit year from a string."""
     if not value:
         return None
-    match = re.search(r'\b(19|20)\d{2}\b', value)
+    match = re.search(r'\b(18|19|20)\d{2}\b', value)
     return int(match.group()) if match else None
 
 
-def parse_float(value: str | None) -> float | None:
-    """Extract first numeric value from a string."""
-    if not value:
+def parse_float(value, max_value: float = 1_000_000_000) -> float | None:
+    if value is None:
         return None
-    # Remove commas, extract first number
-    cleaned = value.replace(',', '')
+    if isinstance(value, (int, float)):
+        return float(value)
+    cleaned = str(value).replace(',', '').replace('$', '').strip()
     match = re.search(r'\d+(\.\d+)?', cleaned)
-    return float(match.group()) if match else None
+    if match:
+        result = float(match.group())
+        return result if result <= max_value else None
+    return None
 
 
-def parse_int(value: str | None, max_value: int = 1000) -> int | None:
-    """Extract first integer from a string, with sanity cap."""
-    if not value:
+def parse_int(value, max_value: int = 1000) -> int | None:
+    if value is None:
         return None
-    match = re.search(r'\d+', value)
+    if isinstance(value, (int, float)):
+        return int(value) if int(value) <= max_value else None
+    match = re.search(r'\d+', str(value))
     if match:
         result = int(match.group())
         return result if result <= max_value else None

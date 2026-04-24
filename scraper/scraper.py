@@ -8,6 +8,8 @@ from scraper.parse_helpers import *
 from dotenv import load_dotenv
 import os
 import re
+import random
+import asyncio
 
 load_dotenv()
 
@@ -28,7 +30,63 @@ async def handle_cookies(page: Page) -> None:
     except Exception:
         print("No cookie popup found — continuing.")
 
+async def human_delay(min_sec: float = 1.5, max_sec: float = 4.0) -> None:
+    """Simulate human-like pause between actions."""
+    await asyncio.sleep(random.uniform(min_sec, max_sec))
+
+async def extract_coordinates(page: Page) -> dict:
+    """Extract lat/lon directly from schema.org metadata."""
+    try:
+        lat = await page.locator("meta[itemprop='latitude']").get_attribute("content")
+        lon = await page.locator("meta[itemprop='longitude']").get_attribute("content")
+        if lat and lon:
+            return {
+                "latitude":  round(float(lat), 6),
+                "longitude": round(float(lon), 6)
+            }
+    except Exception:
+        pass
+    return {"latitude": None, "longitude": None}
+
+async def extract_characteristics(page: Page) -> dict:
+    """Dynamically extract all carac-container key-value pairs."""
+    result = {}
+    try:
+        containers = page.locator(".carac-container")
+        count = await containers.count()
+
+        for i in range(count):
+            container = containers.nth(i)
+            title = await safe_text(container.locator(".carac-title"))
+            value = await safe_text(container.locator(".carac-value"))
+
+            if not title or not value:
+                continue
+
+            key = (
+                title.strip()
+                .lower()
+                .replace(" ", "_")
+                .replace("(", "")
+                .replace(")", "")
+                .replace("/", "_")
+                .replace("-", "_")
+                .replace("'", "")
+            )
+            result[key] = value.strip()
+
+    except Exception as e:
+        print(f"  ⚠️ Characteristics error: {e}")
+
+    return result
+
 async def get_listings_from_page(page: Page) -> list[dict]:
+    
+    current_url = page.url
+    if "captcha" in current_url or "blocked" in current_url:
+        print("⚠️ Blocked — pausing for 60 seconds...")
+        await asyncio.sleep(60)
+        return []
     try:
         await page.wait_for_selector(
             "[class*='property-thumbnail-item']",
@@ -60,12 +118,18 @@ async def get_listings_from_page(page: Page) -> list[dict]:
             "bathrooms":    await safe_text(card.locator("[class*='sdb']")),
             "property_url": f"{BASE_URL}" + property_url if property_url else None
         })
+    
+    await human_delay()
     return listings
 
 async def enrich_listing(page: Page, url: str) -> dict:
     await page.goto(url)
     await page.wait_for_load_state("networkidle")
+    await human_delay()
+    
 
+    coords    = await extract_coordinates(page)
+    chars     = await extract_characteristics(page)
     financial = await extract_financial_details(page)
 
     return {
@@ -89,7 +153,7 @@ async def enrich_listing(page: Page, url: str) -> dict:
         "rental_income":        await extract_detail(page, "Revenus", "Revenue"),
         "zoning":               await extract_detail(page, "Zonage", "Zoning"),
         "ceiling_height":       await extract_detail(page, "Hauteur sous plafond", "Ceiling height"),
-        # Financial details
+        "chars":                chars,
         **financial
     }
 

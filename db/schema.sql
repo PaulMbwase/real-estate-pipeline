@@ -38,14 +38,15 @@ CREATE TABLE IF NOT EXISTS properties (
     pool            BOOLEAN DEFAULT FALSE,
     basement        BOOLEAN DEFAULT FALSE,
     waterfront      BOOLEAN DEFAULT FALSE,
-    municipal_assessment    DECIMAL(12,2)  -- total assessed value
-    assessment_year         SMALLINT       -- year of assessment
-    lot_assessment          DECIMAL(12,2)  -- lot portion
-    building_assessment     DECIMAL(12,2)  -- building portion
+    municipal_assessment    DECIMAL(12,2),  -- total assessed value
+    assessment_year         SMALLINT,       -- year of assessment
+    lot_assessment          DECIMAL(12,2),  -- lot portion
+    building_assessment     DECIMAL(12,2), -- building portion
 
     -- Annual expenses
-    municipal_taxes         DECIMAL(10,2)
-    school_taxes            DECIMAL(10,2)
+    municipal_taxes         DECIMAL(10,2),
+    school_taxes            DECIMAL(10,2),
+    characteristics JSONB,
     financial_data  JSONB,
     created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );

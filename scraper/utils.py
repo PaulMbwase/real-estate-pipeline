@@ -14,25 +14,18 @@ async def geocode_address(address: str | None) -> dict:
     if not address:
         return {"latitude": None, "longitude": None}
     query = f"{address}, Quebec, Canada"
-    # rest stays the same
-
     try:
-        # Run blocking geopy call in executor to keep async flow
         loop = asyncio.get_event_loop()
-        location = await loop.run_in_executor(
-            None, 
-            lambda: geolocator.geocode(query, timeout=10) # type: ignore
+        location = await asyncio.wait_for(
+            loop.run_in_executor(None, lambda: geolocator.geocode(query, timeout=10)), # type: ignore
+            timeout=15
         )
         if location:
-            return {
-                "latitude":  round(location.latitude, 6), # type: ignore
-                "longitude": round(location.longitude, 6) # type: ignore
-            }
-    except GeocoderTimedOut:
-        print(f"Geocoding timeout for: {query}")
+            return {"latitude": round(location.latitude, 6), "longitude": round(location.longitude, 6)} # type: ignore
+    except (asyncio.CancelledError, asyncio.TimeoutError):
+        print(f"  ⚠️ Geocoding timeout: {query}")
     except Exception as e:
-        print(f"Geocoding error for {query}: {e}")
-
+        print(f"  ⚠️ Geocoding error: {e}")
     return {"latitude": None, "longitude": None}
 
 
@@ -40,7 +33,7 @@ async def safe_text(locator) -> str | None:
     """Safely extract text from a locator."""
     try:
         if await locator.count() > 0:
-            text = await locator.first.text_content()
+            text = await locator.first.text_content(timeout=5000)
             return " ".join(text.split()) if text else None
         return None
     except Exception:
@@ -51,7 +44,7 @@ async def safe_attr(locator, attr: str) -> str | None:
     """Safely extract an attribute from a locator."""
     try:
         if await locator.count() > 0:
-            value = await locator.first.get_attribute(attr)
+            value = await locator.first.get_attribute(attr, timeout=5000)
             return value.strip() if value else None
         return None
     except Exception:

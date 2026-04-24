@@ -1,17 +1,11 @@
 # scraper/main.py
 import time
+import random
+import multiprocessing
 import asyncio
 from playwright.async_api import async_playwright
 from dotenv import load_dotenv
-from scraper.scraper import (
-    handle_cookies,
-    get_listings_from_page,
-    enrich_listing,
-    extract_broker_url,
-    extract_broker_details,
-    save_raw,
-    get_total_pages
-)
+from scraper.scraper import *
 from scraper.utils import geocode_address
 from scraper.parse_helpers import *
 from db.models import (
@@ -29,7 +23,8 @@ load_dotenv()
 
 BASE_URL  = os.getenv("BASE_URL")
 TARGET_URL = os.getenv("TARGET_URL")
-
+TARGET_URL_RESIDENTIAL = os.getenv("TARGET_URL_RESIDENTIAL")
+TARGET_URL_COMMERCIAL  = os.getenv("TARGET_URL_COMMERCIAL")
 
 # ----------------------------
 # DB INSERTION HELPERS
@@ -66,7 +61,8 @@ def upsert_broker(session: Session, broker_data: dict) -> Broker | None:
     return broker
 
 
-def upsert_location(session: Session, address: str | None, geo: dict) -> Location:
+def upsert_location(session: Session, address: str | None, detail: dict) -> Location:
+    """Insert location if not exists, return location object."""
     location = session.scalar(
         select(Location).where(Location.address == address)
     )
@@ -74,8 +70,8 @@ def upsert_location(session: Session, address: str | None, geo: dict) -> Locatio
         location = Location(
             address   = address,
             province  = "QC",
-            latitude  = geo.get("latitude"),
-            longitude = geo.get("longitude"),
+            latitude  = detail.get("latitude"),
+            longitude = detail.get("longitude"),
         )
         session.add(location)
         session.flush()
@@ -140,6 +136,7 @@ def upsert_property(session: Session, listing_data: dict,
             assessment_year      = parse_int(detail.get("assessment_year")),
             municipal_taxes      = parse_float(detail.get("municipal_taxes")),
             school_taxes         = parse_float(detail.get("school_taxes")),
+            characteristics      = detail.get("chars", {}),
             financial_data       = detail.get("financial_data", {}),
         )
         session.add(prop)
@@ -161,15 +158,38 @@ def upsert_listing(session: Session, listing_data: dict,
 
     raw_price = listing_data.get("price")
     price     = None
-    if raw_price:
-        # Clean price string → Decimal : "$450,000" → 450000.00
-        # price = raw_price.replace("$", "").replace(",", "").replace(" ", "").strip()
-        match = re.search(r'[\d,]+', raw_price.replace(" ", ""))
-        try:
-            price = float(match.group().replace(",", ".")) if match else None
+    
+    if raw_price is not None:
+        if isinstance(raw_price, (int, float)):
+            price = float(raw_price)
+        else:
+            match = re.search(r'[\d,]+', str(raw_price).replace(" ", ""))
+            price = float(match.group().replace(",", "")) if match else None
+    # if raw_price:
+        # # Clean price string → Decimal : "$450,000" → 450000.00
+        # price1 = raw_price.replace("$", "").replace(",", "").replace(" ", "").strip()
+        # match = re.search(r'[\d,]+', raw_price.replace(" ", "").replace(",", ""))
+        # try:
+        #     price = float(match.group()) if match elif float(price) else None
+            
+        #     price = float(price)
+        # except ValueError:
+        #     price = None
 
-        except ValueError:
-            price = None
+        # raw_price_clean = raw_price.replace(" ", "").replace("\xa0", "") # Enlever espaces normaux et insécables
+
+        # match = re.search(r'[\d,.]+', raw_price_clean)
+
+        # if match:
+        #     try:
+        #         # On récupère le texte, on remplace la virgule par un point (standard Python)
+        #         # et on enlève les points qui serviraient de séparateurs de milliers
+        #         value = match.group().replace(",", ".")
+        #         price = float(value)
+        #     except ValueError:
+        #         price = None
+        # else:
+        #     price = None
 
     if not listing:
         listing = Listing(
@@ -184,6 +204,11 @@ def upsert_listing(session: Session, listing_data: dict,
         )
         session.add(listing)
         session.flush()
+        if price:
+            session.add(PriceHistory(
+                listing_id = listing.id,
+                price      = price,
+            ))
         print(f"  New listing: {listing_id}")
 
     else:
@@ -357,21 +382,29 @@ def insert_listing_extension(session: Session, listing: Listing,
 # asyncio.run(main())
 
 
-async def main():
+async def main(target_url: str):
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=False)
-        page    = await browser.new_page()
 
-        # Step 1 — Load site and handle cookies
+        USER_AGENTS = [
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36",
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/123.0.0.0 Safari/537.36",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:125.0) Gecko/20100101 Firefox/125.0",
+        ]
+
+
+        browser = await p.chromium.launch(headless=False)
+        context = await browser.new_context(
+            user_agent=random.choice(USER_AGENTS)
+        )
+        page = await context.new_page()
+
         await page.goto(f"{BASE_URL}")
         await page.wait_for_load_state("networkidle")
         await handle_cookies(page)
 
-        # Step 2 — Navigate to listings page 1
-        await page.goto(f"{TARGET_URL}")
+        await page.goto(f"{target_url}")
         await page.wait_for_load_state("networkidle")
 
-        # Step 3 — Get total pages
         total_pages = await get_total_pages(page)
         print(f"Total pages: {total_pages}")
 
@@ -381,10 +414,28 @@ async def main():
             for page_num in range(1, total_pages + 1):
                 print(f"\n--- Scraping page {page_num}/{total_pages} ---")
 
-                # Build page URL directly
-                page_url = f"{TARGET_URL}&page={page_num}"
-                await page.goto(page_url)
-                await page.wait_for_load_state("networkidle")
+                # Recover browser if it died
+                try:
+                    await page.title()
+                except Exception:
+                    print("  ⚠️ Browser died — restarting...")
+                    try:
+                        await browser.close()
+                    except Exception:
+                        pass
+                    browser = await p.chromium.launch(headless=False)
+                    page = await browser.new_page()
+                    await page.goto(f"{BASE_URL}")
+                    await page.wait_for_load_state("networkidle")
+                    await handle_cookies(page)
+
+                try:
+                    page_url = f"{TARGET_URL}&pageSize=20&page={page_num}"
+                    await page.goto(page_url)
+                    await page.wait_for_load_state("networkidle")
+                except Exception as e:
+                    print(f"  ❌ Failed to load page {page_num}: {e}")
+                    continue
 
                 listings = await get_listings_from_page(page)
 
@@ -398,7 +449,20 @@ async def main():
                         detail = await enrich_listing(page, url)
                         await save_raw(listing_data["property_id"], {**listing_data, **detail})
                         
-                        geo = await geocode_address(listing_data.get("address")) # type: ignore
+                        try:
+                            # geo = await geocode_address(listing_data.get("address"))
+                            # Coordinates from page first, Nominatim only as fallback
+                            coords = {
+                                "latitude":  detail.get("latitude"),
+                                "longitude": detail.get("longitude"),
+                            }
+                            if not coords["latitude"]:
+                                coords = await geocode_address(listing_data.get("address"))
+
+                            detail["latitude"]  = coords["latitude"]
+                            detail["longitude"] = coords["longitude"]
+                        except Exception:
+                            detail = {"latitude": None, "longitude": None} # type: ignore
                         # geo = await geocode_address(
                             # listing_data.get("street"),
                             # listing_data.get("city")
@@ -420,11 +484,11 @@ async def main():
                             else:
                                 broker = scraped_brokers[broker_id]
 
-                            await page.goto(url)
-                            await page.wait_for_load_state("networkidle")
+                            # await page.goto(url)
+                            # await page.wait_for_load_state("networkidle")
 
                         with session.begin_nested():
-                            location = upsert_location(session, listing_data.get("address"), geo)
+                            location = upsert_location(session, listing_data.get("address"), detail)
                             prop     = upsert_property(session, listing_data, detail, location)
                             if not prop:
                                 continue
@@ -432,11 +496,12 @@ async def main():
                             if not listing:
                                 continue
                             insert_images(session, listing, detail.get("images", []))
-                            insert_listing_extension(session, listing, listing_data, detail)  # ← add this
+                            insert_listing_extension(session, listing, listing_data, detail)  
 
 
                         session.commit()
                         print(f"  ✅ Saved: {listing_data['property_id']}")
+                        time.sleep(random.randint(1,3))
 
                     except Exception as e:
                         print(f"  ❌ Failed: {listing_data['property_id']} — {e}")
@@ -446,4 +511,29 @@ async def main():
         await browser.close()
         print("\n✅ Scraping complete.")
 
-asyncio.run(main())
+# asyncio.run(main())
+
+
+def start_scraper(target_url: str):
+    """Entry point for each process — each gets its own event loop."""
+    asyncio.run(main(target_url))
+
+
+if __name__ == "__main__":
+    p1 = multiprocessing.Process(
+        target=start_scraper,
+        args=(TARGET_URL_RESIDENTIAL,),
+        name="residential"
+    )
+    p2 = multiprocessing.Process(
+        target=start_scraper,
+        args=(TARGET_URL_COMMERCIAL,),
+        name="commercial"
+    )
+
+    p1.start()
+    p2.start()
+    print("Both scrapers running in parallel...")
+    p1.join()
+    p2.join()
+    print("Both scrapers finished.")
