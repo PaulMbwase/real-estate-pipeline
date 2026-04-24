@@ -11,10 +11,24 @@ geolocator = Nominatim(user_agent="real-estate-pipeline")
 #         return {"latitude": None, "longitude": None}
 
 #     query = ", ".join(filter(None, [street, city, "Quebec, Canada"]))
+
+
+def fix_encoding(text: str | None) -> str | None:
+    """Attempt to fix common encoding corruption in French text."""
+    if not text:
+        return None
+    try:
+        # Try to fix latin-1 misread as cp1252
+        return text.encode("cp1252").decode("utf-8")
+    except (UnicodeEncodeError, UnicodeDecodeError):
+        return text
+
 async def geocode_address(address: str | None) -> dict:
     if not address:
         return {"latitude": None, "longitude": None}
-    query = f"{address}, Quebec, Canada"
+    
+    clean = fix_encoding(address)
+    query = f"{clean}, Quebec, Canada"
     try:
         loop = asyncio.get_event_loop()
         location = await asyncio.wait_for(

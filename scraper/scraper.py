@@ -38,7 +38,7 @@ async def safe_goto(page: Page, url: str, retries: int = 3) -> bool:
     """Navigate with retry logic for network failures."""
     for attempt in range(retries):
         try:
-            await page.goto(url)
+            await page.goto(url, timeout=60000)
             await page.wait_for_load_state("networkidle")
             return True
         except Exception as e:

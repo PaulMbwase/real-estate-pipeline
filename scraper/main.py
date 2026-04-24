@@ -70,8 +70,8 @@ def upsert_location(session: Session, address: str | None, detail: dict) -> Loca
         location = Location(
             address   = address,
             province  = "QC",
-            latitude  = detail.get("latitude"),
-            longitude = detail.get("longitude"),
+            latitude  = float(detail["latitude"])  if detail.get("latitude")  is not None else None,
+            longitude = float(detail["longitude"]) if detail.get("longitude") is not None else None,
         )
         session.add(location)
         session.flush()
@@ -275,7 +275,7 @@ def insert_listing_extension(session: Session, listing: Listing,
 
     elif any(x in category for x in ["commercial", "office", "industrial", 
                             "restaurant", "warehouse", "retail",
-                            "business", "building"]):
+                            "business", "building", "income_properties"]):
         existing = session.scalar(
             select(ListingCommercial).where(ListingCommercial.listing_id == listing.id)
         )
@@ -284,107 +284,12 @@ def insert_listing_extension(session: Session, listing: Listing,
                 listing_id     = listing.id,
                 zoning         = safe_truncate(detail.get("zoning"), 255),
                 business_type  = safe_truncate(detail.get("business_type"), 255),
-                ceiling_height = parse_float(detail.get("ceiling_height"), max_values=50.0),
+                ceiling_height = parse_float(detail.get("ceiling_height"), max_value=50.0),
             ))
-# ----------------------------
-# MAIN PIPELINE
-# ----------------------------
 
-# async def main():
-#     async with async_playwright() as p:
-#         browser = await p.chromium.launch(headless=False)
-#         page    = await browser.new_page()
-
-#         # Step 1 — Load site and handle cookies
-#         await page.goto(f"{BASE_URL}")
-#         await page.wait_for_load_state("networkidle")
-#         await handle_cookies(page)
-
-#         # Step 2 — Navigate to listings
-#         await page.goto(f"{TARGET_URL}")
-#         pager = page.locator("#divPagerBottom li.pager-current")
-#         print(f"[DEBUG] Pager count: {await pager.count()}")
-#         print(f"[DEBUG] Pager text: {await pager.text_content()}")
-
-#         await page.wait_for_load_state("networkidle")
-
-#         scraped_brokers = {}  # broker_id → Broker object cache
-#         page_num        = 1
-
-#         with Session(engine) as session:
-#             while True:
-#                 print(f"\n--- Scraping page {page_num} ---")
-
-#                 # Phase 1 — Extract listing cards
-#                 listings = await get_listings_from_page(page)
-
-#                 for listing_data in listings:
-#                     print(f"\nProcessing: {listing_data['property_id']}")
-#                     url = listing_data.get("property_url")
-#                     if not url:
-#                         continue
-
-#                     # Phase 2 — Enrich from detail page
-#                     detail = await enrich_listing(page, url)
-#                     await save_raw(listing_data["property_id"], {**listing_data, **detail})
-
-#                     # Geocode address
-#                     geo = await geocode_address(
-#                         listing_data.get("street"),
-#                         listing_data.get("city")
-#                     )
-
-#                     # Extract broker
-#                     broker_info = await extract_broker_url(page)
-#                     broker      = None
-
-#                     if broker_info:
-#                         broker_id = broker_info["broker_id"]
-
-#                         if broker_id not in scraped_brokers:
-#                             # Visit broker page only once
-#                             broker_details = await extract_broker_details(
-#                                 page, broker_info["broker_url"]
-#                             )
-#                             broker_info.update(broker_details)
-
-#                             with session.begin_nested():
-#                                 broker = upsert_broker(session, broker_info)
-#                             scraped_brokers[broker_id] = broker
-#                         else:
-#                             broker = scraped_brokers[broker_id]
-
-#                         # Return to listing detail page after broker visit
-#                         await page.goto(url)
-#                         await page.wait_for_load_state("networkidle")
-
-#                     # Insert into DB
-#                     with session.begin_nested():
-#                         location = upsert_location(session, listing_data, geo)
-#                         prop     = upsert_property(session, listing_data, detail, location)
-#                         if not prop:
-#                             continue
-#                         listing  = upsert_listing(session, listing_data, detail, prop, broker)
-#                         if not listing:
-#                             continue
-#                         insert_images(session, listing, detail.get("images", []))
-
-#                     session.commit()
-#                     print(f"  ✅ Saved: {listing_data['property_id']}")
-
-#                 # Pagination
-#                 has_next = await paginate(page)
-#                 if not has_next:
-#                     break
-#                 page_num += 1
-#                 time.sleep(6000)
-
-#         await browser.close()
-#         print("\n✅ Scraping complete.")
-
-# asyncio.run(main())
-
-
+########################
+### MAIN PIPELINE ######
+########################
 async def main(target_url: str):
     async with async_playwright() as p:
 
@@ -421,6 +326,11 @@ async def main(target_url: str):
         scraped_brokers = {}
 
         with Session(engine) as session:
+            # Warm up broker cache from DB
+            existing_broker_ids = session.scalars(select(Broker.broker_id)).all()
+            scraped_brokers     = {bid: None for bid in existing_broker_ids}
+            print(f"  Loaded {len(scraped_brokers)} brokers from cache.")
+
             for page_num in range(1, total_pages + 1):
                 await wait_for_network()
                 print(f"\n--- Scraping page {page_num}/{total_pages} ---")
@@ -478,6 +388,7 @@ async def main(target_url: str):
                             }
                             if not coords["latitude"]:
                                 coords = await geocode_address(listing_data.get("address"))
+                                print(f"  📍 Result: {coords}")
 
                             detail["latitude"]  = coords["latitude"]
                             detail["longitude"] = coords["longitude"]
@@ -535,7 +446,9 @@ async def main(target_url: str):
         await browser.close()
         print("\n✅ Scraping complete.")
 
-# asyncio.run(main())
+##############################
+##### MULTIPROCESSING SETUP ##
+##############################
 
 
 def start_scraper(target_url: str):
