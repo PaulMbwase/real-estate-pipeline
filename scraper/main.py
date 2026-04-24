@@ -242,9 +242,10 @@ def insert_images(session: Session, listing: Listing, images: list[str]) -> None
         ))
 
 def insert_listing_extension(session: Session, listing: Listing, 
-                              listing_data: dict, detail: dict) -> None:
+                              listing_data: dict, detail: dict, prop) -> None:
     """Insert into the appropriate extension table based on property type."""
-    category = (listing_data.get("category") or "").lower()
+    # category = (listing_data.get("category") or "").lower()
+    category = prop.property_type or ""
 
     if "condo" in category:
         existing = session.scalar(
