@@ -121,6 +121,11 @@ async def get_listings_from_page(page: Page) -> list[dict]:
         property_url = await safe_attr(card.locator("a"), "href")
         property_id  = property_url.split('/')[-1] if property_url else None
 
+        # Extract coordinates from card if available
+        lat_lng = card.locator("[data-lat]")
+        card_lat = await safe_attr(lat_lng, "data-lat")
+        card_lng = await safe_attr(lat_lng, "data-lng")
+
         listings.append({
             "property_id":  property_id,
             "category":     await safe_text(card.locator("[class*='category']")),
@@ -129,6 +134,8 @@ async def get_listings_from_page(page: Page) -> list[dict]:
             "bedrooms":     await safe_text(card.locator("[class*='cac']")),
             "bathrooms":    await safe_text(card.locator("[class*='sdb']")),
             "property_url": f"{BASE_URL}" + property_url if property_url else None
+            "card_latitude":  float(card_lat) if card_lat else None,
+            "card_longitude": float(card_lng) if card_lng else None,
         })
     
     await human_delay()

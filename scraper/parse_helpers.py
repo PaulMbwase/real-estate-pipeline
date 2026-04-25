@@ -89,3 +89,29 @@ def normalize_transaction_type(category: str | None) -> list[str]:
     if "for rent" in cat:
         return ["for_rent"]
     return ["for_sale"]
+
+def parse_commercial_price(price_str: str | None) -> dict:
+    """Parse commercial rental price string.
+    e.g. '$1 /year /square foot' → {price: 1.0, rent_per_sqft: 1.0, rent_period: 'yearly'}
+    """
+    if not price_str:
+        return {"price": None, "rent_per_sqft": None, "rent_period": None}
+
+    result = {"price": None, "rent_per_sqft": None, "rent_period": None}
+
+    # Extract numeric value
+    match = re.search(r'[\d,]+\.?\d*', price_str.replace(",", ""))
+    if match:
+        result["price"] = float(match.group())
+
+    # Detect per sqft pricing
+    if "square foot" in price_str.lower() or "sq" in price_str.lower():
+        result["rent_per_sqft"] = result["price"]
+
+    # Detect period
+    if "year" in price_str.lower():
+        result["rent_period"] = "yearly"
+    elif "month" in price_str.lower():
+        result["rent_period"] = "monthly"
+
+    return result

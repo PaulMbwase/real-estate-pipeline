@@ -158,38 +158,21 @@ def upsert_listing(session: Session, listing_data: dict,
 
     raw_price = listing_data.get("price")
     price     = None
-    
+
     if raw_price is not None:
         if isinstance(raw_price, (int, float)):
             price = float(raw_price)
         else:
-            match = re.search(r'[\d,]+', str(raw_price).replace(" ", ""))
-            price = float(match.group().replace(",", "")) if match else None
-    # if raw_price:
-        # # Clean price string → Decimal : "$450,000" → 450000.00
-        # price1 = raw_price.replace("$", "").replace(",", "").replace(" ", "").strip()
-        # match = re.search(r'[\d,]+', raw_price.replace(" ", "").replace(",", ""))
-        # try:
-        #     price = float(match.group()) if match elif float(price) else None
-            
-        #     price = float(price)
-        # except ValueError:
-        #     price = None
-
-        # raw_price_clean = raw_price.replace(" ", "").replace("\xa0", "") # Enlever espaces normaux et insécables
-
-        # match = re.search(r'[\d,.]+', raw_price_clean)
-
-        # if match:
-        #     try:
-        #         # On récupère le texte, on remplace la virgule par un point (standard Python)
-        #         # et on enlève les points qui serviraient de séparateurs de milliers
-        #         value = match.group().replace(",", ".")
-        #         price = float(value)
-        #     except ValueError:
-        #         price = None
-        # else:
-        #     price = None
+            # Detect commercial rental pricing — e.g. "$1 /year /square foot"
+            raw_str = str(raw_price).lower()
+            if "square foot" in raw_str or "/year" in raw_str or "/month" in raw_str:
+                commercial_price = parse_commercial_price(raw_price)
+                price = commercial_price["price"]
+                listing_data["rent_per_sqft"] = commercial_price["rent_per_sqft"]
+                listing_data["rent_period"]   = commercial_price["rent_period"]
+            else:
+                match = re.search(r'[\d,]+', str(raw_price).replace(" ", ""))
+                price = float(match.group().replace(",", "")) if match else None
 
     if not listing:
         listing = Listing(
@@ -285,6 +268,8 @@ def insert_listing_extension(session: Session, listing: Listing,
                 zoning         = safe_truncate(detail.get("zoning"), 255),
                 business_type  = safe_truncate(detail.get("business_type"), 255),
                 ceiling_height = parse_float(detail.get("ceiling_height"), max_value=50.0),
+                rent_per_sqft = listing_data.get("rent_per_sqft"),
+                rent_period   = listing_data.get("rent_period"),
             ))
 
 ########################
@@ -382,9 +367,10 @@ async def main(target_url: str):
                         try:
                             # geo = await geocode_address(listing_data.get("address"))
                             # Coordinates from page first, Nominatim only as fallback
+                            # Priority: card coords → page meta → Nominatim fallback
                             coords = {
-                                "latitude":  detail.get("latitude"),
-                                "longitude": detail.get("longitude"),
+                                "latitude":  listing_data.get("card_latitude")  or detail.get("latitude"),
+                                "longitude": listing_data.get("card_longitude") or detail.get("longitude"),
                             }
                             if not coords["latitude"]:
                                 coords = await geocode_address(listing_data.get("address"))
