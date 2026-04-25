@@ -98,7 +98,7 @@ class Listing(Base):
     url: Mapped[Optional[str]] = mapped_column(Text)
     list_date: Mapped[Optional[date]] = mapped_column(Date, default=date.today)
     sold_date: Mapped[Optional[date]] = mapped_column(Date)
-    updated_at: Mapped[datetime] = mapped_column(default=datetime.now)
+    updated_at: Mapped[datetime] = mapped_column(default=datetime.now, onupdate=datetime.now)
     created_at: Mapped[datetime] = mapped_column(default=datetime.now)
 
 
@@ -147,6 +147,21 @@ class ListingCommercial(Base):
     ceiling_height: Mapped[Optional[Decimal]] = mapped_column(Numeric(8,2))
     rent_per_sqft: Mapped[Optional[Decimal]] = mapped_column(Numeric(8,2))
     rent_period:   Mapped[Optional[str]] = mapped_column(String(20))
+
+class ScrapeRun(Base):
+    __tablename__ = "scrape_runs"
+    id:             Mapped[int] = mapped_column(primary_key=True)
+    started_at:     Mapped[datetime] = mapped_column(default=datetime.now)
+    finished_at:    Mapped[Optional[datetime]] = mapped_column()
+    target_url:     Mapped[Optional[str]] = mapped_column(Text)
+    city:           Mapped[Optional[str]] = mapped_column(String(100))
+    category:       Mapped[Optional[str]] = mapped_column(String(50))  # residential/commercial
+    transaction:    Mapped[Optional[str]] = mapped_column(String(20))  # for_sale/for_rent
+    total_pages:    Mapped[Optional[int]] = mapped_column()
+    new_listings:   Mapped[int] = mapped_column(default=0)
+    updated_listings: Mapped[int] = mapped_column(default=0)
+    failed_listings:  Mapped[int] = mapped_column(default=0)
+    status:         Mapped[str] = mapped_column(String(20), default="running")  # running/completed/failed
 
 
 if __name__ == "__main__":

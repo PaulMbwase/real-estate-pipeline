@@ -9,7 +9,7 @@ from scraper.scraper import *
 from scraper.utils import *
 from scraper.parse_helpers import *
 from db.models import (
-    engine, Base,
+    ScrapeRun, engine, Base,
     Broker, Location, Property,
     Listing, ListingImage,
     ListingCondo, ListingPlex, ListingCommercial,
@@ -182,7 +182,7 @@ def upsert_property(session: Session, listing_data: dict,
 
 def upsert_listing(session: Session, listing_data: dict,
                    detail: dict, prop: Property, 
-                   broker: Broker | None) -> Listing | None:
+                   broker: Broker | None) -> tuple[Listing | None, bool]: 
     """Insert or update listing, track price history."""
     p_name = multiprocessing.current_process().name
 
@@ -190,7 +190,7 @@ def upsert_listing(session: Session, listing_data: dict,
     transaction_type = listing_data.get("transaction_type")
     
     if not listing_id:
-        return None
+        return None, True
 
     listing = session.scalar(
         select(Listing).where(
@@ -238,9 +238,11 @@ def upsert_listing(session: Session, listing_data: dict,
                 price      = price,
             ))
         print(f" [{p_name}]  New listing: {listing_id}")
+        return listing, True
 
     else:
         # Listing exists — check for price change
+        listing.updated_at = datetime.now()  # manually trigger update timestamp
         if ((price and listing.price is not None) and float(listing.price) != float(price)): # type: ignore
             print(f" [{p_name}]  Price change detected: {listing.price} → {price}")
             history = PriceHistory(
@@ -250,7 +252,7 @@ def upsert_listing(session: Session, listing_data: dict,
             session.add(history)
             listing.price = price  # type: ignore # update to NEW price
 
-    return listing
+        return listing, False
 
 
 def insert_images(session: Session, listing: Listing, images: list[str]) -> None:
@@ -355,6 +357,18 @@ async def main(target_url: str):
         print(f"Total pages: {total_pages}")
 
         scraped_brokers = {}
+        # Create scrape run record
+        with session.begin_nested():
+            scrape_run = ScrapeRun(
+                target_url  = target_url,
+                city        = os.getenv("CITY", "montreal"),
+                category    = "commercial" if "commercial" in target_url else "residential",
+                transaction = "for_rent" if "for-rent" in target_url else "for_sale",
+                total_pages = total_pages,
+                status      = "running",
+            )
+            session.add(scrape_run)
+        session.commit()
 
         with Session(engine) as session:
             # Warm up broker cache from DB
@@ -467,14 +481,24 @@ async def main(target_url: str):
                             listing_data["transaction_type"] = transaction_type
                             try:
                                 with session.begin_nested():
-                                    listing = upsert_listing(session, listing_data, detail, prop, broker)
+                                    listing, just_inserted = upsert_listing(session, listing_data, detail, prop, broker)
+                                    
+                                    # check
                                     if not listing:
                                         continue
+
+                                    # Adding a scraper run record
+                            
+                                    if just_inserted:  # new listing
+                                        scrape_run.new_listings += 1
+                                    else:              # existing listing
+                                        scrape_run.updated_listings += 1
+
                                     insert_images(session, listing, detail.get("images", []))
                                     insert_listing_extension(session, listing, listing_data, detail, prop)
                             except Exception as e:
-                                p_name = multiprocessing.current_process().name
                                 listing_id = listing_data.get('property_id', 'UNKNOWN')
+                                scrape_run.failed_listings += 1
                                 
                                 print(f"  ❌ [{p_name}] Failed ({transaction_type}): {listing_id} — {e}")
                                 
@@ -496,6 +520,9 @@ async def main(target_url: str):
 
         await browser.close()
         print(f" [{p_name}] ✅ Scraping complete.")
+        scrape_run.finished_at = datetime.now()
+        scrape_run.status      = "completed"
+        session.commit()
 
 ##############################
 ##### MULTIPROCESSING SETUP ##
