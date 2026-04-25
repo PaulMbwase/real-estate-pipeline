@@ -1,4 +1,4 @@
-from sqlalchemy import (create_engine, String, Text,
+from sqlalchemy import (UniqueConstraint, create_engine, String, Text,
                         Numeric, SmallInteger, Boolean,
                         Date, TIMESTAMP, ForeignKey)
 from sqlalchemy.orm import declarative_base, relationship, Mapped, mapped_column
@@ -40,6 +40,12 @@ class Location(Base):
     address:      Mapped[Optional[str]] = mapped_column(String(255))
     province:     Mapped[Optional[str]] = mapped_column(String(50))
     postal_code:  Mapped[Optional[str]] = mapped_column(String(10))
+    civic_number: Mapped[Optional[str]] = mapped_column(String(20))
+    unit_number:  Mapped[Optional[str]] = mapped_column(String(20))
+    street_name:  Mapped[Optional[str]] = mapped_column(String(100))
+    street_type:  Mapped[Optional[str]] = mapped_column(String(20))
+    borough:      Mapped[Optional[str]] = mapped_column(String(100))
+    city:         Mapped[Optional[str]] = mapped_column(String(100))
     neighborhood: Mapped[Optional[str]] = mapped_column(String(150))
     latitude:     Mapped[Optional[Decimal]] = mapped_column(Numeric(9,6))
     longitude:    Mapped[Optional[Decimal]] = mapped_column(Numeric(9,6))
@@ -50,7 +56,7 @@ class Property(Base):
     __tablename__ = "properties"
     id: Mapped[int] = mapped_column(primary_key=True)
     location_id: Mapped[Optional[int]] = mapped_column(ForeignKey("locations.id"))
-    property_id: Mapped[str] = mapped_column(String(50), unique=True)
+    # property_id: Mapped[str] = mapped_column(String(50), unique=True)
     property_type: Mapped[Optional[str]] = mapped_column(String(50))
     year_built: Mapped[Optional[int]] = mapped_column(SmallInteger)
     size_sqft: Mapped[Optional[Decimal]] = mapped_column(Numeric(10,2))
@@ -78,11 +84,14 @@ class Property(Base):
 
 class Listing(Base):
     __tablename__ = "listings"
+    __table_args__ = (                                          # 👈 add this block
+        UniqueConstraint("listing_id", "category", name="listings_listing_id_category_key"),
+    )
     id: Mapped[int] = mapped_column(primary_key=True)
     property_id: Mapped[int] = mapped_column(ForeignKey("properties.id"))
     broker_id: Mapped[Optional[int]] = mapped_column(ForeignKey("brokers.id"))
     listing_id: Mapped[str] = mapped_column(String(50))
-    category: Mapped[str] = mapped_column(String(50))
+    category: Mapped[Optional[str]] = mapped_column(String(50))
     price: Mapped[Optional[Decimal]] = mapped_column(Numeric(12,2))
     status: Mapped[str] = mapped_column(String(20), default="Active")
     description: Mapped[Optional[str]] = mapped_column(Text)
@@ -132,7 +141,7 @@ class ListingPlex(Base):
 class ListingCommercial(Base):
     __tablename__ = "listing_commercial"
     id: Mapped[int] = mapped_column(primary_key=True)
-    listing_id: Mapped[int] = mapped_column(ForeignKey("listings.id"), unique=True)
+    listing_id: Mapped[int] = mapped_column(ForeignKey("listings.id"))
     zoning: Mapped[Optional[str]] = mapped_column(Text)
     business_type: Mapped[Optional[str]] = mapped_column(Text)
     ceiling_height: Mapped[Optional[Decimal]] = mapped_column(Numeric(8,2))

@@ -133,9 +133,9 @@ async def get_listings_from_page(page: Page) -> list[dict]:
             "address":      address,
             "bedrooms":     await safe_text(card.locator("[class*='cac']")),
             "bathrooms":    await safe_text(card.locator("[class*='sdb']")),
-            "property_url": f"{BASE_URL}" + property_url if property_url else None
+            "property_url": f"{BASE_URL}" + property_url if property_url else None,
             "card_latitude":  float(card_lat) if card_lat else None,
-            "card_longitude": float(card_lng) if card_lng else None,
+            "card_longitude": float(card_lng) if card_lng else None
         })
     
     await human_delay()

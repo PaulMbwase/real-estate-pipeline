@@ -16,7 +16,7 @@ from db.models import (
     PriceHistory
 )
 from sqlalchemy.orm import Session
-from sqlalchemy import select
+from sqlalchemy import select, func
 import os
 
 load_dotenv()
@@ -61,15 +61,48 @@ def upsert_broker(session: Session, broker_data: dict) -> Broker | None:
     return broker
 
 
+# def upsert_location(session: Session, address: str | None, detail: dict) -> Location:
+#     """Insert location if not exists, return location object."""
+#     location = session.scalar(
+#         select(Location).where(Location.address == address)
+#     )
+#     if not location:
+#         location = Location(
+#             address   = address,
+#             province  = "QC",
+#             latitude  = float(detail["latitude"])  if detail.get("latitude")  is not None else None,
+#             longitude = float(detail["longitude"]) if detail.get("longitude") is not None else None,
+#         )
+#         session.add(location)
+#         session.flush()
+#     return location
+
 def upsert_location(session: Session, address: str | None, detail: dict) -> Location:
-    """Insert location if not exists, return location object."""
+    parsed = parse_address(address)
+
+    # Deduplicate on normalized components instead of raw string
     location = session.scalar(
+        select(Location).where(
+            func.coalesce(Location.unit_number, '') == func.coalesce(parsed.get("unit_number"), ''),
+            Location.civic_number == parsed.get("civic_number"),
+            Location.street_name  == parsed.get("street_name"),
+            Location.street_type  == parsed.get("street_type"),
+            Location.city         == parsed.get("city"),
+        )
+    ) if parsed.get("street_name") else session.scalar(
         select(Location).where(Location.address == address)
     )
+
     if not location:
         location = Location(
-            address   = address,
-            province  = "QC",
+            address      = address,
+            civic_number = parsed.get("civic_number"),
+            unit_number  = parsed.get("unit_number"),
+            street_name  = parsed.get("street_name"),
+            street_type  = parsed.get("street_type"),
+            borough      = parsed.get("borough"),
+            city         = parsed.get("city"),
+            province     = "QC",
             latitude  = float(detail["latitude"])  if detail.get("latitude")  is not None else None,
             longitude = float(detail["longitude"]) if detail.get("longitude") is not None else None,
         )
@@ -104,18 +137,21 @@ def upsert_location(session: Session, address: str | None, detail: dict) -> Loca
 
 def upsert_property(session: Session, listing_data: dict,
                     detail: dict, location: Location) -> Property | None:
-    property_id = listing_data.get("property_id")
-    if not property_id:
+    # property_id = listing_data.get("property_id")
+    # if not property_id:
+    #     return None
+
+    if not location:
         return None
 
     prop = session.scalar(
-        select(Property).where(Property.property_id == property_id)
+        select(Property).where(Property.location_id == location.id)
     )
 
     if not prop:
         prop = Property(
             location_id    = location.id,
-            property_id    = property_id,
+            # property_id    = property_id,
             property_type  = normalize_property_type(listing_data.get("category")),
             year_built     = parse_year(detail.get("year_built")),
             size_sqft      = parse_float(detail.get("size_sqft")),
@@ -148,13 +184,22 @@ def upsert_listing(session: Session, listing_data: dict,
                    detail: dict, prop: Property, 
                    broker: Broker | None) -> Listing | None:
     """Insert or update listing, track price history."""
-    listing_id = listing_data.get("property_id")
+    p_name = multiprocessing.current_process().name
+
+    listing_id       = listing_data.get("property_id")
+    transaction_type = listing_data.get("transaction_type")
+    
     if not listing_id:
         return None
 
     listing = session.scalar(
-        select(Listing).where(Listing.listing_id == listing_id)
+        select(Listing).where(
+            Listing.listing_id == listing_id,
+            Listing.category   == transaction_type,   # 👈 key fix
+        )
     )
+    print(f" [{p_name}]  DEBUG: listing_id={listing_id}, type={type(listing_id)}, transaction_type={transaction_type}, found={listing.category if listing else None}")
+
 
     raw_price = listing_data.get("price")
     price     = None
@@ -192,12 +237,12 @@ def upsert_listing(session: Session, listing_data: dict,
                 listing_id = listing.id,
                 price      = price,
             ))
-        print(f"  New listing: {listing_id}")
+        print(f" [{p_name}]  New listing: {listing_id}")
 
     else:
         # Listing exists — check for price change
-        if price and float(listing.price) != float(price): # type: ignore
-            print(f"  Price change detected: {listing.price} → {price}")
+        if ((price and listing.price is not None) and float(listing.price) != float(price)): # type: ignore
+            print(f" [{p_name}]  Price change detected: {listing.price} → {price}")
             history = PriceHistory(
                 listing_id  = listing.id,
                 price       = listing.price,  # save OLD price
@@ -276,6 +321,7 @@ def insert_listing_extension(session: Session, listing: Listing,
 ### MAIN PIPELINE ######
 ########################
 async def main(target_url: str):
+    p_name = multiprocessing.current_process().name
     async with async_playwright() as p:
 
         USER_AGENTS = [
@@ -293,7 +339,7 @@ async def main(target_url: str):
 
         success = await safe_goto(page, f"{BASE_URL}")
         if not success:
-            print(f"  ❌ Skipping — could not reach {url}")
+            print(f" [{p_name}]  ❌ Skipping — could not reach target")
             
 
         await handle_cookies(page)
@@ -302,7 +348,7 @@ async def main(target_url: str):
 
         success = await safe_goto(page, target_url)
         if not success:
-            print(f"  ❌ Skipping — could not reach {url}")
+            print(f" [{p_name}]  ❌ Skipping — could not reach target")
             
 
         total_pages = await get_total_pages(page)
@@ -314,7 +360,7 @@ async def main(target_url: str):
             # Warm up broker cache from DB
             existing_broker_ids = session.scalars(select(Broker.broker_id)).all()
             scraped_brokers     = {bid: None for bid in existing_broker_ids}
-            print(f"  Loaded {len(scraped_brokers)} brokers from cache.")
+            print(f" [{p_name}] Loaded {len(scraped_brokers)} brokers from cache.")
 
             for page_num in range(1, total_pages + 1):
                 await wait_for_network()
@@ -334,7 +380,7 @@ async def main(target_url: str):
 
                     success = await safe_goto(page, f"{BASE_URL}")
                     if not success:
-                        print(f"  ❌ Skipping — could not reach {url}")
+                        print(f" [{p_name}]  ❌ Skipping — could not reach target")
                         continue
                     
                     await handle_cookies(page)
@@ -344,19 +390,19 @@ async def main(target_url: str):
 
                     success = await safe_goto(page, page_url)
                     if not success:
-                        print(f"  ❌ Skipping — could not reach {url}")
+                        print(f" [{p_name}]  ❌ Skipping — could not reach target")
                         
 
                 
                 except Exception as e:
-                    print(f"  ❌ Failed to load page {page_num}: {e}")
+                    print(f" [{p_name}]  ❌ Failed to load page {page_num}: {e}")
                     continue
 
                 listings = await get_listings_from_page(page)
 
                 for listing_data in listings:
                     try:
-                        print(f"\nProcessing: {listing_data['property_id']}")
+                        print(f"\n[{p_name}] Processing: {listing_data['property_id']}")
                         url = listing_data.get("property_url")
                         if not url:
                             continue
@@ -404,33 +450,52 @@ async def main(target_url: str):
                             # await page.goto(url)
                             # await page.wait_for_load_state("networkidle")
 
-                        with session.begin_nested():
-                            location = upsert_location(session, listing_data.get("address"), detail)
-                            prop     = upsert_property(session, listing_data, detail, location)
-                            if not prop:
-                                continue
-                            transaction_types = normalize_transaction_type(listing_data.get("category"))
+                        try:
+                            with session.begin_nested():
+                                location = upsert_location(session, listing_data.get("address"), detail)
+                                prop = upsert_property(session, listing_data, detail, location)
+                        except Exception as e:
+                            print(f" [{p_name}]  ⚠️ Critical Property Error: {listing_data.get('property_id')} — {e}")
+                            continue
 
-                            for transaction_type in transaction_types:
-                                listing_data["transaction_type"] = transaction_type
-                                listing = upsert_listing(session, listing_data, detail, prop, broker)
-                                if not listing:
-                                    continue
-                                insert_images(session, listing, detail.get("images", []))
-                                insert_listing_extension(session, listing, listing_data, detail, prop)
+                        if not prop:
+                            continue
+
+                        transaction_types = normalize_transaction_type(listing_data.get("category"))
+
+                        for transaction_type in transaction_types:
+                            listing_data["transaction_type"] = transaction_type
+                            try:
+                                with session.begin_nested():
+                                    listing = upsert_listing(session, listing_data, detail, prop, broker)
+                                    if not listing:
+                                        continue
+                                    insert_images(session, listing, detail.get("images", []))
+                                    insert_listing_extension(session, listing, listing_data, detail, prop)
+                            except Exception as e:
+                                p_name = multiprocessing.current_process().name
+                                listing_id = listing_data.get('property_id', 'UNKNOWN')
+                                
+                                print(f"  ❌ [{p_name}] Failed ({transaction_type}): {listing_id} — {e}")
+                                
+                                # Optional: Save to a file so you can re-run them later
+                                with open("failed_listings.log", "a") as f:
+                                    f.write(f"{listing_id} | {transaction_type} | {p_name} | {str(e)}\n")
+                                
+                                continue
 
 
                         session.commit()
-                        print(f"  ✅ Saved: {listing_data['property_id']}")
+                        print(f" [{p_name}] ✅ Saved: {listing_data['property_id']}")
                         # time.sleep(random.randint(1,3))
 
                     except Exception as e:
-                        print(f"  ❌ Failed: {listing_data['property_id']} — {e}")
+                        print(f" [{p_name}] ❌ Failed: {listing_data['property_id']} — {e}")
                         session.rollback()
                         continue
 
         await browser.close()
-        print("\n✅ Scraping complete.")
+        print(f" [{p_name}] ✅ Scraping complete.")
 
 ##############################
 ##### MULTIPROCESSING SETUP ##
