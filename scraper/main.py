@@ -25,6 +25,9 @@ BASE_URL  = os.getenv("BASE_URL")
 TARGET_URL = os.getenv("TARGET_URL")
 TARGET_URL_RESIDENTIAL = os.getenv("TARGET_URL_RESIDENTIAL")
 TARGET_URL_COMMERCIAL  = os.getenv("TARGET_URL_COMMERCIAL")
+CITY = os.getenv("CITY")
+
+Base.metadata.create_all(bind=engine)
 
 # ----------------------------
 # DB INSERTION HELPERS
@@ -201,7 +204,13 @@ def upsert_listing(session: Session, listing_data: dict,
     print(f" [{p_name}]  DEBUG: listing_id={listing_id}, type={type(listing_id)}, transaction_type={transaction_type}, found={listing.category if listing else None}")
 
 
-    raw_price = listing_data.get("price")
+    if transaction_type == "for_rent" and detail.get("rental_price"):
+        raw_price = detail.get("rental_price")
+    elif transaction_type == "for_sale" and detail.get("sale_price"):
+        raw_price = detail.get("sale_price")
+    else:
+        raw_price = listing_data.get("price")  # fallback — single price listings
+        
     price     = None
 
     if raw_price is not None:
@@ -345,6 +354,8 @@ async def main(target_url: str):
             
 
         await handle_cookies(page)
+        await page.wait_for_load_state("networkidle")
+        await asyncio.sleep(2)
 
        
 
@@ -357,20 +368,21 @@ async def main(target_url: str):
         print(f"Total pages: {total_pages}")
 
         scraped_brokers = {}
-        # Create scrape run record
-        with session.begin_nested():
-            scrape_run = ScrapeRun(
-                target_url  = target_url,
-                city        = os.getenv("CITY", "montreal"),
-                category    = "commercial" if "commercial" in target_url else "residential",
-                transaction = "for_rent" if "for-rent" in target_url else "for_sale",
-                total_pages = total_pages,
-                status      = "running",
-            )
-            session.add(scrape_run)
-        session.commit()
-
+        
         with Session(engine) as session:
+            # Create scrape run record
+            with session.begin_nested():
+                scrape_run = ScrapeRun(
+                    target_url  = target_url,
+                    city        = os.getenv("CITY", "montreal"),
+                    category    = "commercial" if "commercial" in target_url else "residential",
+                    transaction = "for_rent" if "for-rent" in target_url else "for_sale",
+                    total_pages = total_pages,
+                    status      = "running",
+                )
+                session.add(scrape_run)
+            session.commit()
+
             # Warm up broker cache from DB
             existing_broker_ids = session.scalars(select(Broker.broker_id)).all()
             scraped_brokers     = {bid: None for bid in existing_broker_ids}
@@ -517,12 +529,12 @@ async def main(target_url: str):
                         print(f" [{p_name}] ❌ Failed: {listing_data['property_id']} — {e}")
                         session.rollback()
                         continue
-
+            scrape_run.finished_at = datetime.now()
+            scrape_run.status      = "completed"
+            session.commit()
         await browser.close()
         print(f" [{p_name}] ✅ Scraping complete.")
-        scrape_run.finished_at = datetime.now()
-        scrape_run.status      = "completed"
-        session.commit()
+        
 
 ##############################
 ##### MULTIPROCESSING SETUP ##

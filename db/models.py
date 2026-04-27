@@ -145,7 +145,7 @@ class ListingCommercial(Base):
     zoning: Mapped[Optional[str]] = mapped_column(Text)
     business_type: Mapped[Optional[str]] = mapped_column(Text)
     ceiling_height: Mapped[Optional[Decimal]] = mapped_column(Numeric(8,2))
-    rent_per_sqft: Mapped[Optional[Decimal]] = mapped_column(Numeric(8,2))
+    rent_per_sqft: Mapped[Optional[Decimal]] = mapped_column(Numeric(10,2))
     rent_period:   Mapped[Optional[str]] = mapped_column(String(20))
 
 class ScrapeRun(Base):

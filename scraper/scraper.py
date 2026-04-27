@@ -151,6 +151,13 @@ async def enrich_listing(page: Page, url: str) -> dict:
     chars     = await extract_characteristics(page)
     financial = await extract_financial_details(page)
 
+    # Extract dual prices for "for sale or for rent" listings
+    sale_price_el   = page.locator("#BuyPrice")
+    rental_price_el = page.locator(".price .text-nowrap").nth(1)  # second text-nowrap, after "or"
+
+    sale_price   = await safe_text(sale_price_el)
+    rental_price = await safe_text(rental_price_el)
+
     return {
         "size_sqft":            await extract_detail(page, "Superficie habitable", "Living area"),
         "year_built":           await extract_detail(page, "Année de construction", "Year built"),
@@ -172,6 +179,8 @@ async def enrich_listing(page: Page, url: str) -> dict:
         "rental_income":        await extract_detail(page, "Revenus", "Revenue"),
         "zoning":               await extract_detail(page, "Zonage", "Zoning"),
         "ceiling_height":       await extract_detail(page, "Hauteur sous plafond", "Ceiling height"),
+        "sale_price":           await safe_text(sale_price_el),
+        "rental_price":         await safe_text(rental_price_el),   
         "chars":                chars,
         **financial
     }

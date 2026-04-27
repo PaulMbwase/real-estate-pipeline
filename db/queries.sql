@@ -20,11 +20,11 @@ FROM
 
 SELECT count(*) from listings;
 
-select * from listing_commercial ORDER BY id DESC LIMIT 10 OFFSET 10;
+select * from listing_commercial ORDER BY id DESC LIMIT 10 OFFSET 100;
 
 select * from properties LIMIT 10 OFFSET 1;
 
-select * from brokers LIMIT 10 OFFSET 50;
+select * from brokers LIMIT 10 OFFSET 10;
 
 select * from listings LIMIT 10 OFFSET 1 ;
 
@@ -33,7 +33,11 @@ select count(*) from listing_condo;
 select count(*) from listing_plex;
 
 select Count(*) from listing_commercial;
-select * from locations LIMIT 10 OFFSET 1;
+select * from locations LIMIT 10 OFFSET 100;
+
+select listing_id, count(*) from price_history group by listing_id having count(*)>1; -- limit 10 offset 100;
+
+--------------------------------------------------
 
 select l.*
 from (select listing_id, count(*) as total 
@@ -49,12 +53,59 @@ FROM locations
 GROUP BY city
 ORDER BY total DESC;
 
+-- double listing
+SELECT listing_id, COUNT(*) 
+FROM listings 
+GROUP BY listing_id 
+HAVING COUNT(*) > 1;
+
+SELECT l.*
+FROM listings AS l
+JOIN (
+	SELECT listing_id, COUNT(*) 
+	FROM listings 
+	GROUP BY listing_id 
+	HAVING COUNT(*) > 1) AS d 
+ON l.listing_id = d.listing_id;
+
+-- deleting double listing
+-- Find for_rent listings that had the wrong sale price as their first entry
+DELETE FROM price_history
+WHERE id IN (
+    SELECT ph.id
+    FROM price_history ph
+    JOIN listings l ON ph.listing_id = l.id
+    WHERE l.category = 'for_rent'
+    AND ph.price > 100000  -- rental prices are never this high
+);
+-- bad price recorded
+SELECT l1.listing_id, l1.price as for_sale_price, l2.price as for_rent_price
+FROM listings l1
+JOIN listings l2 ON l1.listing_id = l2.listing_id
+WHERE l1.category = 'for_sale'
+AND l2.category = 'for_rent'
+AND l1.price = l2.price
+ORDER BY l1.listing_id;
+
+-- property double listings
+SELECT p.* 
+FROM properties AS p
+JOIN listings AS l ON p.id = l.property_id
+JOIN double_listing AS d ON l.listing_id = d.listing_id;
+
+-- category listing
+
 -- scraping evolution
-SELECT 
-    (SELECT COUNT(*) FROM listings) as total_listings,
-    (SELECT COUNT(*) FROM properties) as total_properties,
-    (SELECT COUNT(*) FROM brokers) as total_brokers,
-    (SELECT COUNT(*) FROM locations) as total_locations;
+SELECT
+    (SELECT COUNT(*) FROM listings)       as listings,
+    (SELECT COUNT(*) FROM properties)     as properties,
+    (SELECT COUNT(*) FROM brokers)        as brokers,
+    (SELECT COUNT(*) FROM locations)      as locations,
+    (SELECT COUNT(*) FROM listing_condo) as condos,
+	(SELECT COUNT(*) FROM listing_commercial) as commercials,
+	(SELECT COUNT(*) FROM listing_plex) as plexes,
+	(SELECT COUNT(*) FROM listing_images) as images,
+    (SELECT COUNT(*) FROM price_history)  as price_history;
 
 -- checking the geocode 
 SELECT 
@@ -77,10 +128,11 @@ WHERE updated_at > created_at
 GROUP BY DATE(updated_at) 
 ORDER BY DATE(updated_at);
 
+------------------
 
 -- Stale/Delisted properties
 SELECT * FROM listings 
-WHERE updated_at < NOW() - INTERVAL '1 days';
+WHERE updated_at < NOW() - INTERVAL '2 days';
 ------------------------------------
 -- Check of string presence on the property_id
 SELECT property_id 
@@ -88,7 +140,8 @@ FROM properties
 WHERE property_id ~ '[^0-9]'
 LIMIT 10;
 
-
+----------------------------
+select * from scrape_runs;
 
 -- check double category
 SELECT id, listing_id, category, price 
@@ -201,3 +254,10 @@ select * from listings  WHERE listing_id = '16747435';
 
 -- Droping property_id in properties listing
 -- ALTER TABLE properties DROP COLUMN property_id;
+
+-- Backing up a db on terminal
+-- pg_dump -U postgres -d real_estate -f data/exports/backup_v4_montreal_complete.sql
+
+-- -- truncating a db
+-- TRUNCATE TABLE listing_images, price_history, listing_condo, listing_plex, listing_commercial, listings, properties, locations, brokers 
+-- RESTART IDENTITY CASCADE;
