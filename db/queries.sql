@@ -1,51 +1,52 @@
+/*
+	This file contains a collection of SQL queries used for testing and 
+preprocessing during the data scraping pipeline.
+	It is organized into the following three sections:
+		Part 1: General Queries – Standard data validation and high-level inspections.
+		Part 2: JSON Extraction – Logic for parsing and flattening 
+				semi-structured data from the platform.
+		Part 3: View Creation – Definitions for persistent database 
+				views to streamline analysis.
 
+*/
+
+/*
+	PART I: GENERAL QUERIES
+*/
+
+-- Property Type Distribution
 SELECT DISTINCT property_type, COUNT(*) AS Total
 FROM properties
 GROUP BY property_type
 ORDER BY Total DESC;
 
-
+-- Listings with Missing Price 
 SELECT 
     COUNT(*) as listings,
     COUNT(price) as with_price,
     COUNT(*) - COUNT(price) as no_price
 FROM listings;
 
+-- Locations With Missing Geolocations
 SELECT 
-	COUNT(*) AS locations,
-	COUNT(latitude) as with_geo,
-	COUNT(*) - COUNT(latitude) as no_geo
-FROM 
-	locations;
+    COUNT(*) as total,
+    COUNT(latitude) as has_coords,
+    COUNT(*) - COUNT(latitude) as missing_coords,
+    ROUND((COUNT(latitude)::numeric / COUNT(*)::numeric) * 100, 2) as success_rate
+FROM locations;
 
-SELECT count(*) from listings;
-
+-- General Checking 
 select * from listing_commercial ORDER BY id DESC LIMIT 10 OFFSET 100;
-
 select * from properties LIMIT 10 OFFSET 1;
-
 select * from brokers LIMIT 10 OFFSET 10;
-
 select * from listings LIMIT 10 OFFSET 1 ;
-
-select count(*) from listing_condo;
-
-select count(*) from listing_plex;
-
-select Count(*) from listing_commercial;
 select * from locations LIMIT 10 OFFSET 100;
+select * from scrape_runs order by id;
+
 
 select listing_id, count(*) from price_history group by listing_id having count(*)>1; -- limit 10 offset 100;
 
 --------------------------------------------------
-
-select l.*
-from (select listing_id, count(*) as total 
-from listings 
-group by listing_id) as test
-join listings as l on l.listing_id = test.listing_id
-where total > 1
-order by l.listing_id ;
 
 -- City Evolution
 SELECT city, COUNT(*) total
@@ -53,31 +54,18 @@ FROM locations
 GROUP BY city
 ORDER BY total DESC;
 
--- double listing
-SELECT listing_id, COUNT(*) 
-FROM listings 
-GROUP BY listing_id 
-HAVING COUNT(*) > 1;
-
-SELECT l.*
-FROM listings AS l
-JOIN (
-	SELECT listing_id, COUNT(*) 
-	FROM listings 
-	GROUP BY listing_id 
-	HAVING COUNT(*) > 1) AS d 
-ON l.listing_id = d.listing_id;
 
 -- deleting double listing
 -- Find for_rent listings that had the wrong sale price as their first entry
-DELETE FROM price_history
-WHERE id IN (
-    SELECT ph.id
-    FROM price_history ph
-    JOIN listings l ON ph.listing_id = l.id
-    WHERE l.category = 'for_rent'
-    AND ph.price > 100000  -- rental prices are never this high
-);
+-- DELETE FROM price_history
+-- WHERE id IN (
+--     SELECT ph.id
+--     FROM price_history ph
+--     JOIN listings l ON ph.listing_id = l.id
+--     WHERE l.category = 'for_rent'
+--     AND ph.price > 100000  -- rental prices are never this high
+-- );
+
 -- bad price recorded
 SELECT l1.listing_id, l1.price as for_sale_price, l2.price as for_rent_price
 FROM listings l1
@@ -88,12 +76,12 @@ AND l1.price = l2.price
 ORDER BY l1.listing_id;
 
 -- property double listings
-SELECT p.* 
+SELECT l.* 
 FROM properties AS p
 JOIN listings AS l ON p.id = l.property_id
 JOIN double_listing AS d ON l.listing_id = d.listing_id;
 
--- category listing
+
 
 -- scraping evolution
 SELECT
@@ -107,13 +95,6 @@ SELECT
 	(SELECT COUNT(*) FROM listing_images) as images,
     (SELECT COUNT(*) FROM price_history)  as price_history;
 
--- checking the geocode 
-SELECT 
-    COUNT(*) as total,
-    COUNT(latitude) as has_coords,
-    COUNT(*) - COUNT(latitude) as missing_coords,
-    ROUND((COUNT(latitude)::numeric / COUNT(*)::numeric) * 100, 2) as success_rate
-FROM locations;
 
 -- New listings per day
 SELECT DATE(created_at), COUNT(*) 
@@ -133,15 +114,8 @@ ORDER BY DATE(updated_at);
 -- Stale/Delisted properties
 SELECT * FROM listings 
 WHERE updated_at < NOW() - INTERVAL '2 days';
-------------------------------------
--- Check of string presence on the property_id
-SELECT property_id 
-FROM properties 
-WHERE property_id ~ '[^0-9]'
-LIMIT 10;
+----------------------------------------------------------------
 
-----------------------------
-select * from scrape_runs;
 
 -- check double category
 SELECT id, listing_id, category, price 
@@ -166,12 +140,6 @@ SELECT constraint_name, constraint_type
 FROM information_schema.table_constraints 
 WHERE table_name = 'listings';
 
--- Checking whether the price file can be stored in the property's characteristcs
-
-SELECT p.id, p.property_id, p.characteristics
-FROM properties AS p
-JOIN listings AS l ON p.id = l.id
-WHERE l.price IS NULL;
 
 -- Checking the missing price
 SELECT l.id, l.price, l.created_at
@@ -188,38 +156,6 @@ JOIN listings l ON l.id = ph.listing_id
 WHERE l.category = 'for_sale'
 AND ph.price < 50000;
 
--- Deleting the ophan price
--- DELETE FROM price_history ph
--- WHERE EXISTS (
---     SELECT 1 FROM listings l
---     WHERE l.id = ph.listing_id
---     AND l.category = 'for_sale'
---     AND ph.price < 50000
--- );
-
--- updating 
--- UPDATE listings l
--- SET price = ph.price
--- FROM price_history ph
--- WHERE ph.listing_id = l.id
--- AND l.category = 'for_sale'
--- AND l.price < 50000;
-
--- deleting the altered price
--- DELETE FROM listing_condo
--- WHERE listing_id IN (
---     SELECT id FROM listings 
---     WHERE category = 'for_sale' AND price < 50000
--- );
-
--- DELETE FROM listings 
--- WHERE category = 'for_sale' 
--- AND price < 50000;
-
--- Altering the database for commercial rental listing
--- ALTER TABLE listing_commercial 
--- ADD COLUMN rent_per_sqft DECIMAL(8,2),
--- ADD COLUMN rent_period VARCHAR(20);  -- 'yearly', 'monthly'
 
 -- checking listing type
 SELECT category, COUNT(*) AS total
@@ -227,34 +163,157 @@ FROM listings
 GROUP BY category 
 ORDER BY total DESC;
 
--- Altering the price_history table 
--- ALTER TABLE price_history DROP CONSTRAINT price_history_listing_id_key;
+-----------------------------------------------------
+SELECT 
+	p.municipal_assessment,
+	(p.financial_data ->> 'municipal_assessment') AS muni
+FROM properties AS p
+WHERE p.municipal_assessment IS NOT NULL;
 
-select * from listings  WHERE listing_id = '16747435';
+-----------------------------------------------------------------------------
+-----------------------------------------------------------------------------
+------------------PART II: JSON EXTRACTION-----------------------------------
+-----------------------------------------------------------------------------
+SELECT DISTINCT jsonb_object_keys(characteristics) as available_fields
+FROM properties
+ORDER BY available_fields DESC;
 
--- Restore the sale price for the corrupted listing
--- UPDATE listings 
--- SET price = 51000000 
--- WHERE listing_id = '20462471' AND category = 'for_sale';
+SELECT DISTINCT jsonb_object_keys(financial_data) as available_fields
+FROM properties
+ORDER BY available_fields DESC;
 
--- Delete the 'fake' price history entry created by the mistake
--- DELETE FROM price_history 
--- WHERE listing_id = (SELECT id FROM listings WHERE listing_id = '20462471' AND category = 'for_sale')
--- AND price = 19.75;
 
--- Altering location table
--- ALTER TABLE locations ADD COLUMN civic_number  VARCHAR(20);
--- ALTER TABLE locations ADD COLUMN unit_number   VARCHAR(20);
--- ALTER TABLE locations ADD COLUMN street_name   VARCHAR(100);
--- ALTER TABLE locations ADD COLUMN street_type   VARCHAR(20);
--- ALTER TABLE locations ADD COLUMN borough       VARCHAR(100);
--- ALTER TABLE locations ADD COLUMN city          VARCHAR(100);
--- ALTER TABLE locations ADD COLUMN postal_code   VARCHAR(10);
--- ALTER TABLE locations RENAME COLUMN address TO raw_address;
 
--- Droping property_id in properties listing
--- ALTER TABLE properties DROP COLUMN property_id;
+SELECT 
+    key, 
+    count(*) AS appearance_count,
+    round(count(*) * 100.0 / (SELECT count(*) FROM properties), 2) AS percent_coverage
+FROM properties, 
+     jsonb_object_keys(characteristics) AS key
+WHERE property_type IN ('house','condo','duplex','triplex',
+                        'quadruplex','quintuplex','condominium_house',
+                        'loft_studio','cottage','mobile_home')
+GROUP BY key
+ORDER BY appearance_count DESC
+LIMIT 30;
 
+SELECT p.characteristics->> 'net_area' as net_area,
+FROM properties as p;    
+
+select * from properties limit 10 offset 1000;
+
+
+select id, location_id
+from properties
+where characteristics ? 'year_built';
+
+------------------------------------------------------------------------------
+------------------------------------------------------------------------------
+------------------------------------------------------------------------------
+------------------- PART III: CREATING VIEWS ---------------------------------
+------------------------------------------------------------------------------
+-- Residential for-sale base view
+CREATE VIEW v_residential_sale AS
+SELECT 
+    l.id as listing_id, l.listing_id as platform_id,
+    l.price, l.created_at, l.updated_at,
+    p.property_type, p.size_sqft, p.bedrooms, p.bathrooms,
+    p.year_built, p.parking, p.garage, p.pool, p.basement,
+    p.municipal_assessment, p.school_taxes, p.municipal_taxes,
+    p.characteristics,
+    loc.city, loc.borough, loc.latitude, loc.longitude,
+    loc.street_type, loc.street_name
+FROM listings l
+JOIN properties p  ON l.property_id = p.id
+JOIN locations loc ON p.location_id  = loc.id
+WHERE l.category = 'for_sale'
+AND l.status     = 'Active'
+AND p.property_type IN ('house','condo','duplex','triplex',
+                        'quadruplex','quintuplex','condominium_house',
+                        'loft_studio','cottage','mobile_home');
+
+-- Commercial base view
+CREATE VIEW v_commercial_sale AS
+SELECT
+    l.id as listing_id, l.listing_id as centris_id,
+    l.price, l.category, l.created_at,
+    p.property_type, p.size_sqft, p.municipal_assessment,
+    lc.zoning, lc.business_type, lc.ceiling_height,
+    lc.rent_per_sqft, lc.rent_period,
+    loc.city, loc.borough, loc.latitude, loc.longitude
+FROM listings l
+JOIN properties p        ON l.property_id  = p.id
+JOIN locations loc       ON p.location_id  = loc.id
+LEFT JOIN listing_commercial lc ON l.id   = lc.listing_id
+WHERE p.property_type IN ('commercial','industrial','office',
+                          'business','income_properties');
+
+-- Investment yield view — joins for_sale and for_rent at same location
+CREATE VIEW v_investment_yield AS
+SELECT
+    ls.listing_id as sale_listing_id,
+    lr.listing_id as rent_listing_id,
+    ls.price      as sale_price,
+    lr.price      as monthly_rent,
+    ROUND((lr.price * 12 / ls.price) * 100, 2) as gross_yield_pct,
+    p.property_type, p.size_sqft, p.bedrooms,
+    loc.city, loc.borough, loc.latitude, loc.longitude
+FROM listings ls
+JOIN listings lr   ON ls.listing_id = lr.listing_id  -- same centris ID
+JOIN properties p  ON ls.property_id = p.id
+JOIN locations loc ON p.location_id  = loc.id
+WHERE ls.category = 'for_sale'
+AND lr.category   = 'for_rent'
+AND ls.price IS NOT NULL
+AND lr.price IS NOT NULL;
+
+
+
+
+
+-- CREATE OR REPLACE VIEW v_residential_sale AS
+SELECT
+    l.id                                as listing_id,
+    l.listing_id                        as centris_id,
+    l.price,
+    l.created_at,
+    l.updated_at,
+    p.property_type,
+    p.size_sqft,
+    p.bedrooms,
+    p.bathrooms,
+    p.half_bathrooms,
+    p.year_built,
+    p.parking,
+    p.garage,
+    p.pool,
+    p.basement,
+    p.municipal_assessment,
+    p.school_taxes,
+    p.municipal_taxes,
+    p.lot_size_sqft,
+    p.floors,
+    p.total_rooms,
+    loc.city,
+    loc.borough,
+    loc.latitude,
+    loc.longitude,
+    loc.street_type
+FROM listings l
+JOIN properties p   ON l.property_id = p.id
+JOIN locations loc  ON p.location_id  = loc.id
+WHERE l.category     = 'for_sale'
+AND   l.status       = 'Active'
+AND   p.property_type IN (
+    'house', 'condo', 'duplex', 'triplex',
+    'quadruplex', 'quintuplex', 'condominium_house',
+    'loft_studio', 'cottage', 'mobile_home'
+);
+
+
+
+
+-------------------------------------------------------------------------------
 -- Backing up a db on terminal
 -- pg_dump -U postgres -d real_estate -f data/exports/backup_v4_montreal_complete.sql
 

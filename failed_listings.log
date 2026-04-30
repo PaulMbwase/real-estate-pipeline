@@ -10,3 +10,9 @@ DETAIL:  Un champ de précision 8 et d'échelle 2 doit être arrondi à une valeur a
 [SQL: INSERT INTO listing_commercial (listing_id, zoning, business_type, ceiling_height, rent_per_sqft, rent_period) VALUES (%(listing_id)s, %(zoning)s, %(business_type)s, %(ceiling_height)s, %(rent_per_sqft)s, %(rent_period)s) RETURNING listing_commercial.id]
 [parameters: {'listing_id': 12078, 'zoning': None, 'business_type': None, 'ceiling_height': None, 'rent_per_sqft': 3495000.0, 'rent_period': None}]
 (Background on this error at: https://sqlalche.me/e/20/9h9h)
+13433387 | for_sale | commercial | (psycopg2.errors.NumericValueOutOfRange) ERREUR:  champ numérique en dehors des limites
+DETAIL:  Un champ de précision 8 et d'échelle 2 doit être arrondi à une valeur absolue inférieure à 10^6.
+
+[SQL: INSERT INTO listing_commercial (listing_id, zoning, business_type, ceiling_height, rent_per_sqft, rent_period) VALUES (%(listing_id)s, %(zoning)s, %(business_type)s, %(ceiling_height)s, %(rent_per_sqft)s, %(rent_period)s) RETURNING listing_commercial.id]
+[parameters: {'listing_id': 1983, 'zoning': None, 'business_type': None, 'ceiling_height': None, 'rent_per_sqft': 3495000.0, 'rent_period': None}]
+(Background on this error at: https://sqlalche.me/e/20/9h9h)
