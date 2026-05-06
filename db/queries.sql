@@ -14,6 +14,10 @@ preprocessing during the data scraping pipeline.
 	PART I: GENERAL QUERIES
 */
 
+SELECT *
+FROM scrape_runs 
+ORDER BY id DESC;
+
 -- Property Type Distribution
 SELECT DISTINCT property_type, COUNT(*) AS Total
 FROM properties
@@ -197,7 +201,7 @@ GROUP BY key
 ORDER BY appearance_count DESC
 LIMIT 30;
 
-SELECT p.characteristics->> 'net_area' as net_area,
+SELECT p.characteristics->> 'net_area' as net_area
 FROM properties as p;    
 
 select * from properties limit 10 offset 1000;

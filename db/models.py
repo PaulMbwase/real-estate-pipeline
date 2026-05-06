@@ -3,21 +3,18 @@ from sqlalchemy import (UniqueConstraint, create_engine, String, Text,
                         Date, TIMESTAMP, ForeignKey)
 from sqlalchemy.orm import declarative_base, relationship, Mapped, mapped_column
 from sqlalchemy.dialects.postgresql import JSONB
-from dotenv import load_dotenv
 from typing import Optional
 from datetime import datetime, date
 from decimal import Decimal
-import os
+from .config import settings
 
-load_dotenv()
-
-DATABASE_URL = (
-    f"postgresql://{os.getenv('DB_USER')}:{os.getenv('DB_PASSWORD')}"
-    f"@{os.getenv('DB_HOST')}:{os.getenv('DB_PORT')}/{os.getenv('DB_NAME')}"
+SQLALCHEMY_DATABASE_URL = (
+    f"postgresql://{settings.database_username}:{settings.database_password}"
+    f"@{settings.database_hostname}:{settings.database_port}/{settings.database_name}"
 )
 
 engine = create_engine(
-    DATABASE_URL,
+    SQLALCHEMY_DATABASE_URL,
     connect_args={"client_encoding": "utf8"}
 )
 Base = declarative_base()
@@ -164,6 +161,6 @@ class ScrapeRun(Base):
     status:         Mapped[str] = mapped_column(String(20), default="running")  # running/completed/failed
 
 
-if __name__ == "__main__":
-    Base.metadata.create_all(engine)
-    print("All tables created successfully!")
+# if __name__ == "__main__":
+#     Base.metadata.create_all(engine)
+#     print("All tables created successfully!")

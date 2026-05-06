@@ -4,7 +4,6 @@ import random
 import multiprocessing
 import asyncio
 from playwright.async_api import async_playwright
-from dotenv import load_dotenv
 from scraper.scraper import *
 from scraper.utils import *
 from scraper.parse_helpers import *
@@ -17,17 +16,16 @@ from db.models import (
 )
 from sqlalchemy.orm import Session
 from sqlalchemy import select, func
-import os
+from db.config import settings
 
-load_dotenv()
 
-BASE_URL  = os.getenv("BASE_URL")
-TARGET_URL = os.getenv("TARGET_URL")
-TARGET_URL_RESIDENTIAL = os.getenv("TARGET_URL_RESIDENTIAL")
-TARGET_URL_COMMERCIAL  = os.getenv("TARGET_URL_COMMERCIAL")
-CITY = os.getenv("CITY")
+BASE_URL  = settings.base_url
+TARGET_URL = settings.target_url
+TARGET_URL_RESIDENTIAL = settings.target_url_residential
+TARGET_URL_COMMERCIAL  = settings.target_url_commercial
+CITY = settings.city
 
-Base.metadata.create_all(bind=engine)
+# Base.metadata.create_all(bind=engine)
 
 # ----------------------------
 # DB INSERTION HELPERS
@@ -64,22 +62,6 @@ def upsert_broker(session: Session, broker_data: dict) -> Broker | None:
     return broker
 
 
-# def upsert_location(session: Session, address: str | None, detail: dict) -> Location:
-#     """Insert location if not exists, return location object."""
-#     location = session.scalar(
-#         select(Location).where(Location.address == address)
-#     )
-#     if not location:
-#         location = Location(
-#             address   = address,
-#             province  = "QC",
-#             latitude  = float(detail["latitude"])  if detail.get("latitude")  is not None else None,
-#             longitude = float(detail["longitude"]) if detail.get("longitude") is not None else None,
-#         )
-#         session.add(location)
-#         session.flush()
-#     return location
-
 def upsert_location(session: Session, address: str | None, detail: dict) -> Location:
     parsed = parse_address(address)
 
@@ -113,36 +95,8 @@ def upsert_location(session: Session, address: str | None, detail: dict) -> Loca
         session.flush()
     return location
 
-# def upsert_location(session: Session, listing_data: dict, geo: dict) -> Location:
-#     """Insert location if not exists, return location object."""
-#     street = listing_data.get("street")
-#     city   = listing_data.get("city")
-
-#     location = session.scalar(
-#         select(Location).where(
-#             Location.street_address == street,
-#             Location.city == city
-#         )
-#     )
-
-#     if not location:
-#         location = Location(
-#             street_address = street,
-#             city           = city,
-#             province       = "QC",
-#             latitude       = geo.get("latitude"),
-#             longitude      = geo.get("longitude"),
-#         )
-#         session.add(location)
-#         session.flush()
-
-#     return location
-
 def upsert_property(session: Session, listing_data: dict,
                     detail: dict, location: Location) -> Property | None:
-    # property_id = listing_data.get("property_id")
-    # if not property_id:
-    #     return None
 
     if not location:
         return None
@@ -374,7 +328,7 @@ async def main(target_url: str):
             with session.begin_nested():
                 scrape_run = ScrapeRun(
                     target_url  = target_url,
-                    city        = os.getenv("CITY", "montreal"),
+                    city        = settings.city if settings.city else "montreal",
                     category    = "commercial" if "commercial" in target_url else "residential",
                     transaction = "for_rent" if "for-rent" in target_url else "for_sale",
                     total_pages = total_pages,
@@ -473,8 +427,6 @@ async def main(target_url: str):
                             else:
                                 broker = scraped_brokers[broker_id]
 
-                            # await page.goto(url)
-                            # await page.wait_for_load_state("networkidle")
 
                         try:
                             with session.begin_nested():
